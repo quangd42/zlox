@@ -13,9 +13,7 @@ pub fn main() !void {
     var chunk = Chunk.init(allocator);
     defer chunk.deinit();
 
-    const constant: ch.Byte = try chunk.addConstant(1.345);
-    try chunk.writeOpCode(.OP_CONSTANT, 13);
-    try chunk.writeByte(constant, 13);
+    try chunk.writeConstant(1.345, 13);
 
     try chunk.writeOpCode(.OP_RETURN, 13);
     debug.disassembleChunk(&chunk, "test chunk");
