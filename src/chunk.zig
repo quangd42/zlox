@@ -73,3 +73,123 @@ pub const Chunk = struct {
         return self.code.items[offset];
     }
 };
+
+const testing = std.testing;
+
+test "Chunk write byte and line tracking" {
+    var c = Chunk.init(testing.allocator);
+    defer c.deinit();
+
+    try c.writeByte(42, 123);
+
+    try testing.expectEqual(1, c.code.items.len);
+    try testing.expectEqual(42, c.code.items[0]);
+    try testing.expectEqual(1, c.lines.items.len);
+    try testing.expectEqual(123, c.lines.items[0]);
+}
+
+test "Chunk write OpCode" {
+    var c = Chunk.init(testing.allocator);
+    defer c.deinit();
+
+    try c.writeOpCode(.OP_RETURN, 456);
+
+    try testing.expectEqual(1, c.code.items.len);
+    try testing.expectEqual(@intFromEnum(OpCode.OP_RETURN), c.code.items[0]);
+    try testing.expectEqual(456, c.lines.items[0]);
+}
+
+test "Chunk add constant" {
+    var c = Chunk.init(testing.allocator);
+    defer c.deinit();
+
+    const val = 3.14;
+    const idx = try c.addConstant(val);
+
+    try testing.expectEqual(0, idx);
+    try testing.expectEqual(1, c.constants.items.len);
+    try testing.expectEqual(3.14, c.constants.items[0]);
+}
+
+test "Chunk write constant - small index" {
+    var c = Chunk.init(testing.allocator);
+    defer c.deinit();
+
+    const val = 2.71;
+    try c.writeConstant(val, 789);
+
+    // Should use OP_CONSTANT for small indexes
+    try testing.expectEqual(2, c.code.items.len);
+    try testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), c.code.items[0]);
+    try testing.expectEqual(0, c.code.items[1]);
+}
+
+test "Chunk write constant - large index" {
+    var c = Chunk.init(testing.allocator);
+    defer c.deinit();
+
+    // First, fill the constant pool to exceed what fits in a single byte
+    var i: usize = 0;
+    const max_byte_val = std.math.maxInt(Byte);
+    while (i <= max_byte_val) : (i += 1) {
+        const val: value.Value = @floatFromInt(i);
+        _ = try c.addConstant(val);
+    }
+
+    // Now add one more that will require the long format
+    const val: value.Value = 999.999;
+    try c.writeConstant(val, 101);
+
+    // Should use OP_CONSTANT_LONG
+    const op_index = c.code.items.len - 4;
+    try testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT_LONG), c.code.items[op_index]);
+
+    // Check 3-byte encoding (little endian)
+    const byte1 = c.code.items[op_index + 1];
+    const byte2 = c.code.items[op_index + 2];
+    const byte3 = c.code.items[op_index + 3];
+
+    const idx: u24 = byte1 | (@as(u24, byte2) << 8) | (@as(u24, byte3) << 16);
+    try testing.expectEqual(@as(u24, max_byte_val + 1), idx);
+    try testing.expectEqual(val, c.constants.items[idx]);
+}
+
+test "Chunk get byte at valid offset" {
+    var c = Chunk.init(testing.allocator);
+    defer c.deinit();
+
+    try c.writeByte(55, 999);
+    const byte = try c.getByteAt(0);
+
+    try testing.expectEqual(55, byte);
+}
+
+test "Chunk get byte at invalid offset" {
+    var c = Chunk.init(testing.allocator);
+    defer c.deinit();
+
+    // Try to get a byte from an empty chunk
+    const result = c.getByteAt(0);
+    try testing.expectError(error.OutOfBounds, result);
+}
+
+test "Chunk multiple operations sequence" {
+    var c = Chunk.init(testing.allocator);
+    defer c.deinit();
+
+    // Write a sequence of operations like you might in real code
+    try c.writeOpCode(.OP_RETURN, 1);
+    const val: value.Value = 42.0;
+    try c.writeConstant(val, 2);
+
+    // Verify the byte sequence
+    try testing.expectEqual(3, c.code.items.len);
+    try testing.expectEqual(@intFromEnum(OpCode.OP_RETURN), c.code.items[0]);
+    try testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), c.code.items[1]);
+    try testing.expectEqual(0, c.code.items[2]); // Constant index
+
+    // Verify line numbers
+    try testing.expectEqual(1, c.lines.items[0]);
+    try testing.expectEqual(2, c.lines.items[1]);
+    try testing.expectEqual(2, c.lines.items[2]);
+}
