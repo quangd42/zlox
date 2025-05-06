@@ -1,0 +1,112 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const dbg = @import("config").@"debug-trace";
+
+const chunk = @import("chunk.zig");
+const Chunk = chunk.Chunk;
+const value = @import("value.zig");
+const Value = value.Value;
+const debug = @import("debug.zig");
+
+const STACK_MAX = 256;
+
+pub const InterpretResult = enum {
+    OK,
+    COMPTIME_ERROR,
+    RUNTIME_ERROR,
+};
+
+pub const VM = struct {
+    chunk: *Chunk = undefined,
+    ip: usize = 0,
+    stack: std.ArrayList(Value),
+    allocator: Allocator,
+
+    pub fn init(allocator: Allocator) VM {
+        return VM{
+            .stack = std.ArrayList(Value).init(allocator),
+            .allocator = allocator,
+        };
+    }
+    pub fn deinit(self: *VM) void {
+        _ = self;
+    }
+
+    pub fn interpret(self: *VM, target: *Chunk) !InterpretResult {
+        self.chunk = target;
+
+        while (self.ip < self.chunk.code.items.len) {
+            if (dbg) {
+                std.debug.print("          ", .{});
+                for (self.stack.items) |*slot| {
+                    std.debug.print("[ {d:3.3} ]", .{slot.*});
+                }
+                std.debug.print("\n", .{});
+                _ = debug.disassembleInstruction(self.chunk, self.ip);
+            }
+            const instruction: chunk.OpCode = @enumFromInt(self.readByte());
+            switch (instruction) {
+                .OP_CONSTANT => try self.stack.append(self.readConstant()),
+                .OP_ADD => try self.binaryOp(.add),
+                .OP_SUBTRACT => try self.binaryOp(.subtract),
+                .OP_MULTIPLY => try self.binaryOp(.multiply),
+                .OP_DIVIDE => try self.binaryOp(.divide),
+                .OP_NEGATE => try self.stack.append(-self.stack.pop().?),
+                .OP_RETURN => {
+                    std.debug.print("{d}\n", .{self.stack.pop().?});
+                    return .OK;
+                },
+                // missing OP_CONSTANT_LONG
+                else => return .COMPTIME_ERROR,
+            }
+        }
+        // WARNING: Implicit OK return
+        return .OK;
+    }
+
+    fn readByte(self: *VM) u8 {
+        defer self.ip += 1;
+        return self.chunk.code.items[self.ip];
+    }
+
+    fn readConstant(self: *VM) value.Value {
+        const constant_idx = self.readByte();
+        return self.chunk.constants.items[constant_idx];
+    }
+
+    fn binaryOp(self: *VM, comptime op: enum { add, subtract, multiply, divide }) !void {
+        const b = self.stack.pop().?;
+        const a = self.stack.pop().?;
+
+        try self.stack.append(switch (op) {
+            .add => a + b,
+            .subtract => a - b,
+            .multiply => a * b,
+            .divide => a / b,
+        });
+    }
+};
+
+const testing = std.testing;
+
+test "ptr on arraylist" {
+    var al = std.ArrayList(u8).init(testing.allocator);
+    defer al.deinit();
+    try al.append('H');
+    try al.append('E');
+    try al.append('L');
+    try al.append('L');
+    try al.append('O');
+
+    var ip_ptr = al.items.ptr;
+    std.debug.print("ip_ptr: {*}\n", .{ip_ptr});
+    try testing.expectEqual('H', ip_ptr[0]);
+    ip_ptr += 1;
+    try testing.expectEqual('E', ip_ptr[0]);
+    {
+        defer ip_ptr += 1;
+        try testing.expectEqual('E', ip_ptr[0]);
+    }
+    try testing.expectEqual('L', ip_ptr[0]);
+    try testing.expectEqualStrings("HELLO", @as([]const u8, al.items));
+}

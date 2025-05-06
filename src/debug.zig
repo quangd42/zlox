@@ -13,7 +13,7 @@ pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
     }
 }
 
-fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
+pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     print("{d:0>4} ", .{offset});
 
     if (offset == 0 or chunk.lines.items[offset] != chunk.lines.items[offset - 1]) {
@@ -22,11 +22,16 @@ fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         print("   | ", .{});
     }
 
-    const byte: ch.Byte = chunk.getByteAt(offset) catch unreachable;
+    const byte: u8 = chunk.getByteAt(offset) catch unreachable;
     const oc: ch.OpCode = @enumFromInt(byte);
     return switch (oc) {
         .OP_CONSTANT => constantInstruction(@tagName(.OP_CONSTANT), chunk, offset),
         .OP_CONSTANT_LONG => constantLongInstruction(@tagName(.OP_CONSTANT_LONG), chunk, offset),
+        .OP_ADD => simpleInstruction(@tagName(.OP_ADD), offset),
+        .OP_SUBTRACT => simpleInstruction(@tagName(.OP_SUBTRACT), offset),
+        .OP_MULTIPLY => simpleInstruction(@tagName(.OP_MULTIPLY), offset),
+        .OP_DIVIDE => simpleInstruction(@tagName(.OP_DIVIDE), offset),
+        .OP_NEGATE => simpleInstruction(@tagName(.OP_NEGATE), offset),
         .OP_RETURN => simpleInstruction(@tagName(.OP_RETURN), offset),
     };
 }
@@ -48,6 +53,6 @@ fn constantLongInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize
 }
 
 fn simpleInstruction(name: []const u8, offset: usize) usize {
-    print("{s}", .{name});
+    print("{s}\n", .{name});
     return offset + 1;
 }

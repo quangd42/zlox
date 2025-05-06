@@ -2,23 +2,26 @@ const std = @import("std");
 const value = @import("value.zig");
 const Allocator = std.mem.Allocator;
 
-pub const Byte = u8;
-
-pub const OpCode = enum(Byte) {
+pub const OpCode = enum(u8) {
     OP_CONSTANT,
     OP_CONSTANT_LONG,
+    OP_ADD,
+    OP_SUBTRACT,
+    OP_MULTIPLY,
+    OP_DIVIDE,
+    OP_NEGATE,
     OP_RETURN,
 };
 
 pub const Chunk = struct {
-    code: std.ArrayList(Byte),
+    code: std.ArrayList(u8),
     constants: value.ValueArray,
     lines: std.ArrayList(usize),
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) Chunk {
         return Chunk{
-            .code = std.ArrayList(Byte).init(allocator),
+            .code = std.ArrayList(u8).init(allocator),
             .constants = value.ValueArray.init(allocator),
             .lines = std.ArrayList(usize).init(allocator),
             .allocator = allocator,
@@ -31,7 +34,7 @@ pub const Chunk = struct {
         self.lines.deinit();
     }
 
-    pub fn writeByte(self: *Chunk, byte: Byte, line: usize) !void {
+    pub fn writeByte(self: *Chunk, byte: u8, line: usize) !void {
         try self.code.append(byte);
         try self.lines.append(line);
     }
@@ -51,7 +54,7 @@ pub const Chunk = struct {
 
     pub fn writeConstant(self: *Chunk, val: value.Value, line: usize) !void {
         const constant_idx: u24 = try self.addConstant(val);
-        const max_byte_val = std.math.maxInt(Byte);
+        const max_byte_val = std.math.maxInt(u8);
 
         if (constant_idx <= max_byte_val) {
             try self.writeOpCode(.OP_CONSTANT, line);
@@ -66,11 +69,18 @@ pub const Chunk = struct {
         try self.writeByte(@intCast((constant_idx >> 16) & 0xFF), line);
     }
 
-    pub fn getByteAt(self: *Chunk, offset: usize) !Byte {
+    pub fn getByteAt(self: *Chunk, offset: usize) !u8 {
         if (offset >= self.code.items.len) {
             return error.OutOfBounds;
         }
         return self.code.items[offset];
+    }
+
+    pub fn getConstantAt(self: *Chunk, offset: usize) !u8 {
+        if (offset >= self.constants.items.len) {
+            return error.OutOfBounds;
+        }
+        return self.constants.items[offset];
     }
 };
 
@@ -130,7 +140,7 @@ test "Chunk write constant - large index" {
 
     // First, fill the constant pool to exceed what fits in a single byte
     var i: usize = 0;
-    const max_byte_val = std.math.maxInt(Byte);
+    const max_byte_val = std.math.maxInt(u8);
     while (i <= max_byte_val) : (i += 1) {
         const val: value.Value = @floatFromInt(i);
         _ = try c.addConstant(val);
