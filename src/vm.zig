@@ -1,12 +1,15 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const testing = std.testing;
+
 const dbg = @import("config").@"debug-trace";
 
 const chunk = @import("chunk.zig");
 const Chunk = chunk.Chunk;
+const Compiler = @import("compiler.zig").Compiler;
+const debug = @import("debug.zig");
 const value = @import("value.zig");
 const Value = value.Value;
-const debug = @import("debug.zig");
 
 const STACK_MAX = 256;
 
@@ -32,34 +35,78 @@ pub const VM = struct {
         _ = self;
     }
 
-    pub fn interpret(self: *VM, target: *Chunk) !InterpretResult {
-        self.chunk = target;
+    pub fn repl(self: *VM) !void {
+        const stdin = std.io.getStdIn().reader();
+        const stdout = std.io.getStdOut().writer();
 
-        while (self.ip < self.chunk.code.items.len) {
-            if (dbg) {
-                std.debug.print("          ", .{});
-                for (self.stack.items) |*slot| {
-                    std.debug.print("[ {d:3.3} ]", .{slot.*});
-                }
-                std.debug.print("\n", .{});
-                _ = debug.disassembleInstruction(self.chunk, self.ip);
-            }
-            const instruction: chunk.OpCode = @enumFromInt(self.readByte());
-            switch (instruction) {
-                .OP_CONSTANT => try self.stack.append(self.readConstant()),
-                .OP_ADD => try self.binaryOp(.add),
-                .OP_SUBTRACT => try self.binaryOp(.subtract),
-                .OP_MULTIPLY => try self.binaryOp(.multiply),
-                .OP_DIVIDE => try self.binaryOp(.divide),
-                .OP_NEGATE => try self.stack.append(-self.stack.pop().?),
-                .OP_RETURN => {
-                    std.debug.print("{d}\n", .{self.stack.pop().?});
-                    return .OK;
-                },
-                // missing OP_CONSTANT_LONG
-                else => return .COMPTIME_ERROR,
+        try stdout.print("zlox 0.1.0\n", .{});
+
+        var buffer: [1024]u8 = undefined;
+        while (true) {
+            try stdout.writeAll("> ");
+            const input = try stdin.readUntilDelimiterOrEof(&buffer, '\n');
+            if (input) |content| {
+                _ = try self.interpret(content);
+            } else {
+                break;
             }
         }
+    }
+
+    pub fn runFile(self: *VM, file_path: []const u8) !void {
+        const stderr = std.io.getStdErr().writer();
+        const exit = std.process.exit;
+
+        const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+            try stderr.print("Could not open file {s}: {s}\n", .{ file_path, @errorName(err) });
+            exit(74);
+        };
+        defer file.close();
+
+        const source = file.readToEndAlloc(self.allocator, 10 * 1024 * 1024) catch |err| {
+            try stderr.print("Could not read file {s}: {s}\n", .{ file_path, @errorName(err) });
+            exit(74);
+        };
+        defer self.allocator.free(source);
+
+        const res = try self.interpret(source);
+        switch (res) {
+            .OK => exit(0),
+            .COMPTIME_ERROR => exit(65),
+            .RUNTIME_ERROR => exit(70),
+        }
+    }
+
+    fn interpret(self: *VM, source: []u8) !InterpretResult {
+        self.chunk = undefined;
+        var compiler = Compiler.init(self.allocator, source);
+        compiler.compile();
+
+        // while (self.ip < self.chunk.code.items.len) {
+        //     if (dbg) {
+        //         std.debug.print("          ", .{});
+        //         for (self.stack.items) |*slot| {
+        //             std.debug.print("[ {d:3.3} ]", .{slot.*});
+        //         }
+        //         std.debug.print("\n", .{});
+        //         _ = debug.disassembleInstruction(self.chunk, self.ip);
+        //     }
+        //     const instruction: chunk.OpCode = @enumFromInt(self.readByte());
+        //     switch (instruction) {
+        //         .OP_CONSTANT => try self.stack.append(self.readConstant()),
+        //         .OP_ADD => try self.binaryOp(.add),
+        //         .OP_SUBTRACT => try self.binaryOp(.subtract),
+        //         .OP_MULTIPLY => try self.binaryOp(.multiply),
+        //         .OP_DIVIDE => try self.binaryOp(.divide),
+        //         .OP_NEGATE => try self.stack.append(-self.stack.pop().?),
+        //         .OP_RETURN => {
+        //             std.debug.print("{d}\n", .{self.stack.pop().?});
+        //             return .OK;
+        //         },
+        //         // missing OP_CONSTANT_LONG
+        //         else => return .COMPTIME_ERROR,
+        //     }
+        // }
         // WARNING: Implicit OK return
         return .OK;
     }
@@ -86,8 +133,6 @@ pub const VM = struct {
         });
     }
 };
-
-const testing = std.testing;
 
 test "ptr on arraylist" {
     var al = std.ArrayList(u8).init(testing.allocator);

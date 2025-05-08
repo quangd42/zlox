@@ -1,6 +1,8 @@
 const std = @import("std");
-const value = @import("value.zig");
 const Allocator = std.mem.Allocator;
+const testing = std.testing;
+
+const value = @import("value.zig");
 
 pub const OpCode = enum(u8) {
     OP_CONSTANT,
@@ -83,8 +85,6 @@ pub const Chunk = struct {
         return self.constants.items[offset];
     }
 };
-
-const testing = std.testing;
 
 test "Chunk write byte and line tracking" {
     var c = Chunk.init(testing.allocator);
