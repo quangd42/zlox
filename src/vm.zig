@@ -11,8 +11,6 @@ const debug = @import("debug.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 
-const STACK_MAX = 256;
-
 pub const InterpretResult = enum {
     OK,
     COMPTIME_ERROR,
@@ -133,25 +131,3 @@ pub const VM = struct {
         });
     }
 };
-
-test "ptr on arraylist" {
-    var al = std.ArrayList(u8).init(testing.allocator);
-    defer al.deinit();
-    try al.append('H');
-    try al.append('E');
-    try al.append('L');
-    try al.append('L');
-    try al.append('O');
-
-    var ip_ptr = al.items.ptr;
-    std.debug.print("ip_ptr: {*}\n", .{ip_ptr});
-    try testing.expectEqual('H', ip_ptr[0]);
-    ip_ptr += 1;
-    try testing.expectEqual('E', ip_ptr[0]);
-    {
-        defer ip_ptr += 1;
-        try testing.expectEqual('E', ip_ptr[0]);
-    }
-    try testing.expectEqual('L', ip_ptr[0]);
-    try testing.expectEqualStrings("HELLO", @as([]const u8, al.items));
-}

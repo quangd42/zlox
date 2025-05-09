@@ -44,6 +44,20 @@ pub fn build(b: *std.Build) void {
     // step when running `zig build`).
     b.installArtifact(exe);
 
+    // This is where build-on-save check step begins.
+    // As you can see we are re-defining the same executable but
+    // we're binding it to a dedicated build step.
+    const exe_check = b.addExecutable(.{
+        .name = "zlox",
+        .root_module = exe_mod,
+    });
+    // There is no `b.installArtifact(exe_check);` here.
+
+    // Finally we add the "check" step which will be detected
+    // by ZLS and automatically enable Build-On-Save.
+    const check = b.step("check", "Check if zlox compiles");
+    check.dependOn(&exe_check.step);
+
     // This *creates* a Run step in the build graph, to be executed when another
     // step is evaluated that depends on it. The next line below will establish
     // such a dependency.
