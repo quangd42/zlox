@@ -5,14 +5,14 @@ const testing = std.testing;
 const value = @import("value.zig");
 
 pub const OpCode = enum(u8) {
-    OP_CONSTANT,
-    OP_CONSTANT_LONG,
-    OP_ADD,
-    OP_SUBTRACT,
-    OP_MULTIPLY,
-    OP_DIVIDE,
-    OP_NEGATE,
-    OP_RETURN,
+    CONSTANT,
+    CONSTANT_LONG,
+    ADD,
+    SUBTRACT,
+    MULTIPLY,
+    DIVIDE,
+    NEGATE,
+    RETURN,
 };
 
 pub const Chunk = struct {
@@ -36,12 +36,12 @@ pub const Chunk = struct {
         self.lines.deinit();
     }
 
-    pub fn writeByte(self: *Chunk, byte: u8, line: usize) !void {
+    pub fn writeByte(self: *Chunk, byte: u8, line: usize) Allocator.Error!void {
         try self.code.append(byte);
         try self.lines.append(line);
     }
 
-    pub fn writeOpCode(self: *Chunk, oc: OpCode, line: usize) !void {
+    pub fn writeOpCode(self: *Chunk, oc: OpCode, line: usize) Allocator.Error!void {
         try self.writeByte(@intFromEnum(oc), line);
     }
 
@@ -59,12 +59,12 @@ pub const Chunk = struct {
         const max_byte_val = std.math.maxInt(u8);
 
         if (constant_idx <= max_byte_val) {
-            try self.writeOpCode(.OP_CONSTANT, line);
+            try self.writeOpCode(.CONSTANT, line);
             try self.writeByte(@intCast(constant_idx), line);
             return;
         }
 
-        try self.writeOpCode(.OP_CONSTANT_LONG, line);
+        try self.writeOpCode(.CONSTANT_LONG, line);
         // Write the index as three bytes (little-endian)
         try self.writeByte(@intCast(constant_idx & 0xFF), line);
         try self.writeByte(@intCast((constant_idx >> 8) & 0xFF), line);
@@ -102,10 +102,10 @@ test "Chunk write OpCode" {
     var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
-    try c.writeOpCode(.OP_RETURN, 456);
+    try c.writeOpCode(.RETURN, 456);
 
     try testing.expectEqual(1, c.code.items.len);
-    try testing.expectEqual(@intFromEnum(OpCode.OP_RETURN), c.code.items[0]);
+    try testing.expectEqual(@intFromEnum(OpCode.RETURN), c.code.items[0]);
     try testing.expectEqual(456, c.lines.items[0]);
 }
 
@@ -130,7 +130,7 @@ test "Chunk write constant - small index" {
 
     // Should use OP_CONSTANT for small indexes
     try testing.expectEqual(2, c.code.items.len);
-    try testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), c.code.items[0]);
+    try testing.expectEqual(@intFromEnum(OpCode.CONSTANT), c.code.items[0]);
     try testing.expectEqual(0, c.code.items[1]);
 }
 
@@ -152,7 +152,7 @@ test "Chunk write constant - large index" {
 
     // Should use OP_CONSTANT_LONG
     const op_index = c.code.items.len - 4;
-    try testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT_LONG), c.code.items[op_index]);
+    try testing.expectEqual(@intFromEnum(OpCode.CONSTANT_LONG), c.code.items[op_index]);
 
     // Check 3-byte encoding (little endian)
     const byte1 = c.code.items[op_index + 1];
@@ -188,14 +188,14 @@ test "Chunk multiple operations sequence" {
     defer c.deinit();
 
     // Write a sequence of operations like you might in real code
-    try c.writeOpCode(.OP_RETURN, 1);
+    try c.writeOpCode(.RETURN, 1);
     const val: value.Value = 42.0;
     try c.writeConstant(val, 2);
 
     // Verify the byte sequence
     try testing.expectEqual(3, c.code.items.len);
-    try testing.expectEqual(@intFromEnum(OpCode.OP_RETURN), c.code.items[0]);
-    try testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), c.code.items[1]);
+    try testing.expectEqual(@intFromEnum(OpCode.RETURN), c.code.items[0]);
+    try testing.expectEqual(@intFromEnum(OpCode.CONSTANT), c.code.items[1]);
     try testing.expectEqual(0, c.code.items[2]); // Constant index
 
     // Verify line numbers

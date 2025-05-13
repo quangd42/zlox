@@ -25,14 +25,14 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     const byte: u8 = chunk.getByteAt(offset) catch unreachable;
     const oc: ch.OpCode = @enumFromInt(byte);
     return switch (oc) {
-        .OP_CONSTANT => constantInstruction(@tagName(.OP_CONSTANT), chunk, offset),
-        .OP_CONSTANT_LONG => constantLongInstruction(@tagName(.OP_CONSTANT_LONG), chunk, offset),
-        .OP_ADD => simpleInstruction(@tagName(.OP_ADD), offset),
-        .OP_SUBTRACT => simpleInstruction(@tagName(.OP_SUBTRACT), offset),
-        .OP_MULTIPLY => simpleInstruction(@tagName(.OP_MULTIPLY), offset),
-        .OP_DIVIDE => simpleInstruction(@tagName(.OP_DIVIDE), offset),
-        .OP_NEGATE => simpleInstruction(@tagName(.OP_NEGATE), offset),
-        .OP_RETURN => simpleInstruction(@tagName(.OP_RETURN), offset),
+        .CONSTANT => constantInstruction(@tagName(.CONSTANT), chunk, offset),
+        .CONSTANT_LONG => constantLongInstruction(@tagName(.CONSTANT_LONG), chunk, offset),
+        .ADD => simpleInstruction(@tagName(.ADD), offset),
+        .SUBTRACT => simpleInstruction(@tagName(.SUBTRACT), offset),
+        .MULTIPLY => simpleInstruction(@tagName(.MULTIPLY), offset),
+        .DIVIDE => simpleInstruction(@tagName(.DIVIDE), offset),
+        .NEGATE => simpleInstruction(@tagName(.NEGATE), offset),
+        .RETURN => simpleInstruction(@tagName(.RETURN), offset),
     };
 }
 

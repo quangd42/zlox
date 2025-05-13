@@ -4,16 +4,15 @@ const testing = std.testing;
 
 const dbg = @import("config").@"debug-trace";
 
-const chunk = @import("chunk.zig");
-const Chunk = chunk.Chunk;
+const _chunk = @import("chunk.zig");
+const Chunk = _chunk.Chunk;
 const Compiler = @import("compiler.zig").Compiler;
 const debug = @import("debug.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 
-pub const InterpretResult = enum {
-    OK,
-    COMPTIME_ERROR,
+pub const InterpretError = error{
+    COMPILE_ERROR,
     RUNTIME_ERROR,
 };
 
@@ -44,7 +43,7 @@ pub const VM = struct {
             try stdout.writeAll("> ");
             const input = try stdin.readUntilDelimiterOrEof(&buffer, '\n');
             if (input) |content| {
-                _ = try self.interpret(content);
+                try self.interpret(content);
             } else {
                 break;
             }
@@ -67,46 +66,30 @@ pub const VM = struct {
         };
         defer self.allocator.free(source);
 
-        const res = try self.interpret(source);
-        switch (res) {
-            .OK => exit(0),
-            .COMPTIME_ERROR => exit(65),
-            .RUNTIME_ERROR => exit(70),
-        }
+        self.interpret(source) catch |err| switch (err) {
+            InterpretError.COMPILE_ERROR => exit(65),
+            InterpretError.RUNTIME_ERROR => exit(70),
+        };
+        exit(0);
     }
 
-    fn interpret(self: *VM, source: []u8) !InterpretResult {
-        self.chunk = undefined;
-        var compiler = Compiler.init(self.allocator, source);
-        compiler.compile();
+    fn interpret(self: *VM, source: []const u8) InterpretError!void {
+        var chunk = Chunk.init(self.allocator);
+        defer chunk.deinit();
 
-        // while (self.ip < self.chunk.code.items.len) {
-        //     if (dbg) {
-        //         std.debug.print("          ", .{});
-        //         for (self.stack.items) |*slot| {
-        //             std.debug.print("[ {d:3.3} ]", .{slot.*});
-        //         }
-        //         std.debug.print("\n", .{});
-        //         _ = debug.disassembleInstruction(self.chunk, self.ip);
-        //     }
-        //     const instruction: chunk.OpCode = @enumFromInt(self.readByte());
-        //     switch (instruction) {
-        //         .OP_CONSTANT => try self.stack.append(self.readConstant()),
-        //         .OP_ADD => try self.binaryOp(.add),
-        //         .OP_SUBTRACT => try self.binaryOp(.subtract),
-        //         .OP_MULTIPLY => try self.binaryOp(.multiply),
-        //         .OP_DIVIDE => try self.binaryOp(.divide),
-        //         .OP_NEGATE => try self.stack.append(-self.stack.pop().?),
-        //         .OP_RETURN => {
-        //             std.debug.print("{d}\n", .{self.stack.pop().?});
-        //             return .OK;
-        //         },
-        //         // missing OP_CONSTANT_LONG
-        //         else => return .COMPTIME_ERROR,
-        //     }
-        // }
-        // WARNING: Implicit OK return
-        return .OK;
+        var compiler = Compiler.init(self.allocator, source, &chunk);
+        compiler.compile() catch return InterpretError.COMPILE_ERROR;
+
+        self.chunk = &chunk;
+        self.ip = 0;
+
+        return self.run();
+    }
+
+    // TODO:
+    fn run(self: *VM) InterpretError!void {
+        _ = self;
+        return;
     }
 
     fn readByte(self: *VM) u8 {

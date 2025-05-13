@@ -1,12 +1,12 @@
 const std = @import("std");
 
 pub const Scanner = struct {
-    source: []u8,
+    source: []const u8,
     start: usize,
     current: usize,
     line: usize,
 
-    pub fn init(source: []u8) Scanner {
+    pub fn init(source: []const u8) Scanner {
         return .{
             .source = source,
             .start = 0,
@@ -55,6 +55,7 @@ pub const Scanner = struct {
     }
 
     fn peekNext(s: *Scanner) u8 {
+        if (s.current + 1 >= s.source.len) return '0' - 1;
         return s.source[s.current + 1];
     }
 
@@ -102,10 +103,18 @@ pub const Scanner = struct {
     }
 
     fn makeNumberToken(s: *Scanner) Token {
-        while (isDigit(s.peek())) s.current += 1;
-        if (s.peek() == '.' and isDigit(s.peekNext())) {
-            s.current += 1;
-            while (isDigit(s.peek())) s.current += 1;
+        while (!s.isAtEnd()) {
+            if (isDigit(s.peek())) {
+                s.current += 1;
+                continue;
+            }
+            if (s.peek() == '.' and isDigit(s.peekNext())) {
+                s.current += 1;
+                while (!s.isAtEnd() and isDigit(s.peek())) {
+                    s.current += 1;
+                }
+            }
+            break;
         }
         return s.makeToken(.NUMBER);
     }
@@ -128,7 +137,6 @@ pub const Scanner = struct {
         };
     }
 
-    // TODO: consider using builtin error type
     fn errorToken(s: *Scanner, msg: []const u8) Token {
         return .{
             .type = .ERROR,
