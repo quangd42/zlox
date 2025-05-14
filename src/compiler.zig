@@ -7,8 +7,10 @@ const dbg = @import("config").@"debug-trace";
 
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
-const debug = @import("debug.zig");
 const OpCode = _chunk.OpCode;
+const debug = @import("debug.zig");
+const _obj = @import("obj.zig");
+const Obj = _obj.Obj;
 const scanner = @import("scanner.zig");
 const Scanner = scanner.Scanner;
 const Token = scanner.Token;
@@ -191,7 +193,7 @@ fn makeParseRules() ParseRuleArray {
         .LESS_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
         // Literals.
         .IDENTIFIER = .{},
-        .STRING = .{},
+        .STRING = .{ .prefix = string },
         .NUMBER = .{ .prefix = number },
         // Keywords.
         .AND = .{},
@@ -283,4 +285,10 @@ fn literal(self: *Compiler) Allocator.Error!void {
         .TRUE => try self.emitOpCode(.TRUE),
         else => unreachable,
     }
+}
+
+fn string(self: *Compiler) Allocator.Error!void {
+    const prev = &self.parser.previous;
+    const str_obj = try _obj.String.init(self.allocator, prev.lexeme[1 .. prev.lexeme.len - 1]);
+    try self.emitConstant(.{ .Obj = &str_obj.obj });
 }

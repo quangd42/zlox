@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
-const value = @import("value.zig");
+const Value = @import("value.zig").Value;
 
 pub const OpCode = enum(u8) {
     CONSTANT,
@@ -26,14 +26,14 @@ pub const OpCode = enum(u8) {
 
 pub const Chunk = struct {
     code: std.ArrayList(u8),
-    constants: value.ValueArray,
+    constants: std.ArrayList(Value),
     lines: std.ArrayList(usize),
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) Chunk {
         return Chunk{
             .code = std.ArrayList(u8).init(allocator),
-            .constants = value.ValueArray.init(allocator),
+            .constants = std.ArrayList(Value).init(allocator),
             .lines = std.ArrayList(usize).init(allocator),
             .allocator = allocator,
         };
@@ -54,7 +54,7 @@ pub const Chunk = struct {
         try self.writeByte(@intFromEnum(oc), line);
     }
 
-    pub fn addConstant(self: *Chunk, val: value.Value) !u24 {
+    pub fn addConstant(self: *Chunk, val: Value) !u24 {
         // Constant index has to fit into a u24
         if (self.constants.items.len > std.math.maxInt(u24)) {
             return error.TooManyConstants;
@@ -63,7 +63,7 @@ pub const Chunk = struct {
         return @intCast(self.constants.items.len - 1);
     }
 
-    pub fn writeConstant(self: *Chunk, val: value.Value, line: usize) !void {
+    pub fn writeConstant(self: *Chunk, val: Value, line: usize) !void {
         const constant_idx: u24 = try self.addConstant(val);
         const max_byte_val = std.math.maxInt(u8);
 
@@ -87,7 +87,7 @@ pub const Chunk = struct {
         return self.code.items[offset];
     }
 
-    pub fn getConstantAt(self: *Chunk, offset: usize) !value.Value {
+    pub fn getConstantAt(self: *Chunk, offset: usize) !Value {
         if (offset >= self.constants.items.len) {
             return error.OutOfBounds;
         }
@@ -151,12 +151,12 @@ test "Chunk write constant - large index" {
     var i: usize = 0;
     const max_byte_val = std.math.maxInt(u8);
     while (i <= max_byte_val) : (i += 1) {
-        const val: value.Value = .{ .number = @floatFromInt(i) };
+        const val: Value = .{ .number = @floatFromInt(i) };
         _ = try c.addConstant(val);
     }
 
     // Now add one more that will require the long format
-    const val: value.Value = .{ .Number = 999.999 };
+    const val: Value = .{ .Number = 999.999 };
     try c.writeConstant(val, 101);
 
     // Should use OP_CONSTANT_LONG
@@ -198,7 +198,7 @@ test "Chunk multiple operations sequence" {
 
     // Write a sequence of operations like you might in real code
     try c.writeOpCode(.RETURN, 1);
-    const val: value.Value = 42.0;
+    const val: Value = 42.0;
     try c.writeConstant(val, 2);
 
     // Verify the byte sequence

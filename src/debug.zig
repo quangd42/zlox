@@ -1,8 +1,9 @@
 const std = @import("std");
 const print = std.debug.print;
 
-const ch = @import("chunk.zig");
-const Chunk = ch.Chunk;
+const _chunk = @import("chunk.zig");
+const Chunk = _chunk.Chunk;
+const OpCode = _chunk.OpCode;
 
 pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
     print("== {s} ==\n", .{name});
@@ -23,7 +24,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     }
 
     const byte: u8 = chunk.getByteAt(offset) catch unreachable;
-    const oc: ch.OpCode = @enumFromInt(byte);
+    const oc: OpCode = @enumFromInt(byte);
     return switch (oc) {
         .CONSTANT => |tag| constantInstruction(@tagName(tag), chunk, offset),
         .CONSTANT_LONG => |tag| constantLongInstruction(@tagName(tag), chunk, offset),

@@ -1,8 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const ch = @import("chunk.zig");
-const Chunk = ch.Chunk;
+const Chunk = @import("chunk.zig").Chunk;
 const debug = @import("debug.zig");
 const vm = @import("vm.zig");
 const VM = vm.VM;
