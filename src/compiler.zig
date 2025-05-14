@@ -181,14 +181,14 @@ fn makeParseRules() ParseRuleArray {
         .SLASH = .{ .infix = binary, .precedence = .FACTOR },
         .STAR = .{ .infix = binary, .precedence = .FACTOR },
         // One or two character tokens.
-        .BANG = .{},
-        .BANG_EQUAL = .{},
-        .EQUAL = .{},
-        .EQUAL_EQUAL = .{},
-        .GREATER = .{},
-        .GREATER_EQUAL = .{},
-        .LESS = .{},
-        .LESS_EQUAL = .{},
+        .BANG = .{ .prefix = unary },
+        .BANG_EQUAL = .{ .infix = binary, .precedence = .EQUALITY },
+        .EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
+        .EQUAL_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
+        .GREATER = .{ .infix = binary, .precedence = .COMPARISON },
+        .GREATER_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
+        .LESS = .{ .infix = binary, .precedence = .COMPARISON },
+        .LESS_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
         // Literals.
         .IDENTIFIER = .{},
         .STRING = .{},
@@ -197,17 +197,17 @@ fn makeParseRules() ParseRuleArray {
         .AND = .{},
         .CLASS = .{},
         .ELSE = .{},
-        .FALSE = .{},
+        .FALSE = .{ .prefix = literal },
         .FOR = .{},
         .FUN = .{},
         .IF = .{},
-        .NIL = .{},
+        .NIL = .{ .prefix = literal },
         .OR = .{},
         .PRINT = .{},
         .RETURN = .{},
         .SUPER = .{},
         .THIS = .{},
-        .TRUE = .{},
+        .TRUE = .{ .prefix = literal },
         .VAR = .{},
         .WHILE = .{},
 
@@ -245,6 +245,7 @@ fn unary(self: *Compiler) Allocator.Error!void {
 
     switch (operator_type) {
         .MINUS => try self.emitOpCode(.NEGATE),
+        .BANG => try self.emitOpCode(.NOT),
         else => unreachable,
     }
 }
@@ -259,6 +260,27 @@ fn binary(self: *Compiler) Allocator.Error!void {
         .MINUS => try self.emitOpCode(.SUBTRACT),
         .STAR => try self.emitOpCode(.MULTIPLY),
         .SLASH => try self.emitOpCode(.DIVIDE),
+        .EQUAL_EQUAL => try self.emitOpCode(.EQUAL),
+        .BANG_EQUAL => {
+            try self.emitOpCode(.EQUAL);
+            try self.emitOpCode(.NOT);
+        },
+        .GREATER => try self.emitOpCode(.GREATER),
+        .GREATER_EQUAL => try self.emitOpCode(.GREATER_EQUAL),
+        .LESS => try self.emitOpCode(.LESS),
+        .LESS_EQUAL => try self.emitOpCode(.LESS_EQUAL),
+        else => |tt| {
+            if (dbg) print("{}\n", .{tt});
+            unreachable;
+        },
+    }
+}
+
+fn literal(self: *Compiler) Allocator.Error!void {
+    switch (self.parser.previous.type) {
+        .FALSE => try self.emitOpCode(.FALSE),
+        .NIL => try self.emitOpCode(.NIL),
+        .TRUE => try self.emitOpCode(.TRUE),
         else => unreachable,
     }
 }

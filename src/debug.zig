@@ -25,14 +25,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     const byte: u8 = chunk.getByteAt(offset) catch unreachable;
     const oc: ch.OpCode = @enumFromInt(byte);
     return switch (oc) {
-        .CONSTANT => constantInstruction(@tagName(.CONSTANT), chunk, offset),
-        .CONSTANT_LONG => constantLongInstruction(@tagName(.CONSTANT_LONG), chunk, offset),
-        .ADD => simpleInstruction(@tagName(.ADD), offset),
-        .SUBTRACT => simpleInstruction(@tagName(.SUBTRACT), offset),
-        .MULTIPLY => simpleInstruction(@tagName(.MULTIPLY), offset),
-        .DIVIDE => simpleInstruction(@tagName(.DIVIDE), offset),
-        .NEGATE => simpleInstruction(@tagName(.NEGATE), offset),
-        .RETURN => simpleInstruction(@tagName(.RETURN), offset),
+        .CONSTANT => |tag| constantInstruction(@tagName(tag), chunk, offset),
+        .CONSTANT_LONG => |tag| constantLongInstruction(@tagName(tag), chunk, offset),
+        else => |tag| simpleInstruction(@tagName(tag), offset),
     };
 }
 

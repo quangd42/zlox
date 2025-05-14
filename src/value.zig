@@ -37,6 +37,20 @@ pub const Value = union(ValueType) {
             else => null,
         };
     }
+
+    pub fn equal(self: Value, other: Value) bool {
+        return switch (self) {
+            inline else => |value, tag| tag == std.meta.activeTag(other) and value == @field(other, @tagName(tag)),
+        };
+    }
+
+    pub inline fn isFalsey(self: Value) bool {
+        return switch (self) {
+            .Nil => true,
+            .Bool => |b| !b,
+            else => false,
+        };
+    }
 };
 
 pub const ValueArray = std.ArrayList(Value);

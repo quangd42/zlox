@@ -7,10 +7,19 @@ const value = @import("value.zig");
 pub const OpCode = enum(u8) {
     CONSTANT,
     CONSTANT_LONG,
+    NIL,
+    TRUE,
+    FALSE,
+    EQUAL,
+    GREATER,
+    GREATER_EQUAL,
+    LESS,
+    LESS_EQUAL,
     ADD,
     SUBTRACT,
     MULTIPLY,
     DIVIDE,
+    NOT,
     NEGATE,
     RETURN,
 };
@@ -78,7 +87,7 @@ pub const Chunk = struct {
         return self.code.items[offset];
     }
 
-    pub fn getConstantAt(self: *Chunk, offset: usize) !u8 {
+    pub fn getConstantAt(self: *Chunk, offset: usize) !value.Value {
         if (offset >= self.constants.items.len) {
             return error.OutOfBounds;
         }
