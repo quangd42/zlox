@@ -38,7 +38,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
 
 fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const constant_idx = chunk.code.items[offset + 1];
-    print("{s:-<16} {d:4} '{d}'\n", .{ name, constant_idx, chunk.constants.items[constant_idx] });
+    print("{s:-<16} {d:4} '{}'\n", .{ name, constant_idx, chunk.constants.items[constant_idx] });
     return offset + 2;
 }
 
@@ -48,7 +48,7 @@ fn constantLongInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize
     const byte3: u24 = @intCast(chunk.code.items[offset + 3]);
     const constant_idx: u24 = byte1 | byte2 << 8 | byte3 << 16;
 
-    print("{s:-<16} {d:4} '{d}'\n", .{ name, constant_idx, chunk.constants.items[constant_idx] });
+    print("{s:-<16} {d:4} '{}'\n", .{ name, constant_idx, chunk.constants.items[constant_idx] });
     return offset + 2;
 }
 

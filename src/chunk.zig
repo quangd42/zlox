@@ -142,12 +142,12 @@ test "Chunk write constant - large index" {
     var i: usize = 0;
     const max_byte_val = std.math.maxInt(u8);
     while (i <= max_byte_val) : (i += 1) {
-        const val: value.Value = @floatFromInt(i);
+        const val: value.Value = .{ .number = @floatFromInt(i) };
         _ = try c.addConstant(val);
     }
 
     // Now add one more that will require the long format
-    const val: value.Value = 999.999;
+    const val: value.Value = .{ .Number = 999.999 };
     try c.writeConstant(val, 101);
 
     // Should use OP_CONSTANT_LONG

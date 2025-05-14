@@ -231,7 +231,7 @@ fn number(self: *Compiler) Allocator.Error!void {
         print("{any}: ", .{err});
         @panic("failed to parse number literal.");
     };
-    try self.emitConstant(val);
+    try self.emitConstant(.{ .Number = val });
 }
 
 fn grouping(self: *Compiler) Allocator.Error!void {
