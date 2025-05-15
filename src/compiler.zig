@@ -29,7 +29,7 @@ pub const Compiler = struct {
             .scanner = Scanner.init(source),
             .parser = Parser{},
             .chunk = chunk,
-            .rules = makeParseRules(),
+            .rules = makeParseRules(), // TODO: make this comptime
             .allocator = allocator,
         };
         compiler.advance();

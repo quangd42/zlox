@@ -122,25 +122,26 @@ test "Chunk add constant" {
     var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
-    const val = 3.14;
+    const val: Value = .{ .Number = 3.14 };
     const idx = try c.addConstant(val);
 
     try testing.expectEqual(0, idx);
     try testing.expectEqual(1, c.constants.items.len);
-    try testing.expectEqual(3.14, c.constants.items[0]);
+    try testing.expectEqual(3.14, c.constants.items[0].Number);
 }
 
 test "Chunk write constant - small index" {
     var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
-    const val = 2.71;
+    const val: Value = .{ .Number = 2.71 };
     try c.writeConstant(val, 789);
 
     // Should use OP_CONSTANT for small indexes
     try testing.expectEqual(2, c.code.items.len);
     try testing.expectEqual(@intFromEnum(OpCode.CONSTANT), c.code.items[0]);
     try testing.expectEqual(0, c.code.items[1]);
+    try testing.expectEqual(val, c.constants.items[0]);
 }
 
 test "Chunk write constant - large index" {
@@ -151,7 +152,7 @@ test "Chunk write constant - large index" {
     var i: usize = 0;
     const max_byte_val = std.math.maxInt(u8);
     while (i <= max_byte_val) : (i += 1) {
-        const val: Value = .{ .number = @floatFromInt(i) };
+        const val: Value = .{ .Number = @floatFromInt(i) };
         _ = try c.addConstant(val);
     }
 
@@ -198,7 +199,7 @@ test "Chunk multiple operations sequence" {
 
     // Write a sequence of operations like you might in real code
     try c.writeOpCode(.RETURN, 1);
-    const val: Value = 42.0;
+    const val: Value = .{ .Number = 42.0 };
     try c.writeConstant(val, 2);
 
     // Verify the byte sequence
