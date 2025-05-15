@@ -112,7 +112,18 @@ pub const VM = struct {
                 .GREATER_EQUAL => try self.binaryOp(.GREATER_EQUAL),
                 .LESS => try self.binaryOp(.LESS),
                 .LESS_EQUAL => try self.binaryOp(.LESS_EQUAL),
-                .ADD => try self.binaryOp(.ADD),
+                .ADD => {
+                    const rhs = self.peek(0);
+                    const lhs = self.peek(1);
+                    if (rhs.is(.Number) and lhs.is(.Number)) {
+                        try self.binaryOp(.ADD);
+                    } else {
+                        errdefer self.runtimeError("Operands must be strings or numbers.", .{});
+                        if (rhs.isObj(.String) and lhs.isObj(.String)) {
+                            try self.concatenate();
+                        } else return error.RuntimeError;
+                    }
+                },
                 .SUBTRACT => try self.binaryOp(.SUBTRACT),
                 .MULTIPLY => try self.binaryOp(.MULTIPLY),
                 .DIVIDE => try self.binaryOp(.DIVIDE),
@@ -180,8 +191,9 @@ pub const VM = struct {
     }
 
     fn binaryOp(self: *VM, comptime op: OpCode) !void {
-        const b = self.pop().?.asNumber() orelse return InterpretError.RuntimeError;
-        const a = self.pop().?.asNumber() orelse return InterpretError.RuntimeError;
+        const b = self.pop().?.as(.Number) orelse return InterpretError.RuntimeError;
+        const a = self.pop().?.as(.Number) orelse return InterpretError.RuntimeError;
+        errdefer self.runtimeError("Operand must be numbers.", .{});
 
         try self.push(switch (op) {
             .ADD => .{ .Number = a + b },
@@ -196,9 +208,20 @@ pub const VM = struct {
         });
     }
 
+    fn concatenate(self: *VM) !void {
+        const b = self.pop().?;
+        const a = self.pop().?;
+        std.debug.assert(b.isObj(.String));
+        std.debug.assert(a.isObj(.String));
+        const b_str = b.asObj(.String) orelse return InterpretError.RuntimeError;
+        const a_str = a.asObj(.String) orelse return InterpretError.RuntimeError;
+        const out = try a_str.concat(self.allocator, b_str);
+        try self.push(.{ .Obj = &out.obj });
+    }
+
     fn equalOp(self: *VM) !void {
         const b = self.pop().?;
         const a = self.pop().?;
-        try self.push(.{ .Bool = a.equal(b) });
+        try self.push(.{ .Bool = a.eql(b) });
     }
 };
