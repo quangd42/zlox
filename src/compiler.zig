@@ -16,21 +16,22 @@ const Scanner = scanner.Scanner;
 const Token = scanner.Token;
 const TokenType = scanner.TokenType;
 const Value = @import("value.zig").Value;
+const VM = @import("vm.zig").VM;
 
 pub const Compiler = struct {
     scanner: Scanner,
     parser: Parser,
     chunk: *Chunk,
+    vm: *VM,
     rules: ParseRuleArray,
-    allocator: Allocator,
 
-    pub fn init(allocator: Allocator, source: []const u8, chunk: *Chunk) Compiler {
+    pub fn init(vm: *VM, source: []const u8, chunk: *Chunk) Compiler {
         var compiler = Compiler{
             .scanner = Scanner.init(source),
             .parser = Parser{},
             .chunk = chunk,
             .rules = makeParseRules(), // TODO: make this comptime
-            .allocator = allocator,
+            .vm = vm,
         };
         compiler.advance();
         return compiler;
@@ -289,6 +290,6 @@ fn literal(self: *Compiler) Allocator.Error!void {
 
 fn string(self: *Compiler) Allocator.Error!void {
     const prev = &self.parser.previous;
-    const str_obj = try _obj.String.init(self.allocator, prev.lexeme[1 .. prev.lexeme.len - 1]);
+    const str_obj = try _obj.String.init(self.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
     try self.emitConstant(.{ .Obj = &str_obj.obj });
 }

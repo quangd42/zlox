@@ -9,8 +9,8 @@ const Chunk = _chunk.Chunk;
 const OpCode = _chunk.OpCode;
 const Compiler = @import("compiler.zig").Compiler;
 const debug = @import("debug.zig");
-const value = @import("value.zig");
-const Value = value.Value;
+const Obj = @import("obj.zig").Obj;
+const Value = @import("value.zig").Value;
 
 pub const InterpretError = error{
     CompileError,
@@ -18,9 +18,10 @@ pub const InterpretError = error{
 } || Allocator.Error;
 
 pub const VM = struct {
-    chunk: *Chunk = undefined,
     ip: usize = 0,
     stack: std.ArrayList(Value),
+    chunk: *Chunk = undefined,
+    objects: ?*Obj = null,
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) VM {
@@ -29,8 +30,13 @@ pub const VM = struct {
             .allocator = allocator,
         };
     }
-    pub fn deinit(self: *VM) void {
-        _ = self;
+    pub fn deinit(vm: *VM) void {
+        var object = vm.objects;
+        while (object != null) {
+            const next = object.?.next;
+            object.?.deinit(vm);
+            object = next;
+        }
     }
 
     pub fn repl(self: *VM) !void {
@@ -81,7 +87,7 @@ pub const VM = struct {
         var chunk = Chunk.init(self.allocator);
         defer chunk.deinit();
 
-        var compiler = Compiler.init(self.allocator, source, &chunk);
+        var compiler = Compiler.init(self, source, &chunk);
         compiler.compile() catch return InterpretError.CompileError;
 
         self.chunk = &chunk;
@@ -148,12 +154,12 @@ pub const VM = struct {
         return self.chunk.getByteAt(self.ip) catch unreachable;
     }
 
-    fn readConstant(self: *VM) value.Value {
+    fn readConstant(self: *VM) Value {
         const constant_idx = self.readByte();
         return self.chunk.getConstantAt(constant_idx) catch unreachable;
     }
 
-    fn readConstantLong(self: *VM) value.Value {
+    fn readConstantLong(self: *VM) Value {
         defer self.ip += 3;
         const byte1: u24 = self.chunk.getByteAt(self.ip) catch unreachable;
         const byte2: u24 = self.chunk.getByteAt(self.ip + 1) catch unreachable;
@@ -215,7 +221,7 @@ pub const VM = struct {
         std.debug.assert(a.isObj(.String));
         const b_str = b.asObj(.String) orelse return InterpretError.RuntimeError;
         const a_str = a.asObj(.String) orelse return InterpretError.RuntimeError;
-        const out = try a_str.concat(self.allocator, b_str);
+        const out = try a_str.concat(self, b_str);
         try self.push(.{ .Obj = &out.obj });
     }
 
@@ -225,3 +231,15 @@ pub const VM = struct {
         try self.push(.{ .Bool = a.eql(b) });
     }
 };
+
+test "vm deinit" {
+    const vm = @constCast(&VM.init(testing.allocator));
+    defer vm.deinit(); // Expect this to free all string allocations
+    const String = @import("obj.zig").String;
+
+    const original_str: []const u8 = "Hello ";
+    const a_str = try String.init(vm, original_str);
+    const b_str = try String.init(vm, "world!");
+    const out = try a_str.concat(vm, b_str);
+    try testing.expectEqualSlices(u8, "Hello world!", out.chars);
+}

@@ -28,10 +28,9 @@ pub const Value = union(Type) {
             .Bool => |val| try writer.print("{}", .{val}),
             .Nil => try writer.writeAll("nil"),
             .Number => |val| try writer.print("{d}", .{val}),
-            // TODO:
             .Obj => |obj| {
                 switch (obj.type) {
-                    .String => try writer.print("{s}", .{self.asObj(obj.type).?.val}),
+                    .String => try writer.print("{s}", .{self.asObj(obj.type).?}),
                 }
             },
         }
@@ -43,9 +42,9 @@ pub const Value = union(Type) {
         };
     }
 
-    pub inline fn isObj(self: Value, obj_type: ObjType) bool {
+    pub inline fn isObj(self: Value, obj_t: ObjType) bool {
         return switch (self) {
-            .Obj => |obj| obj.type == obj_type,
+            .Obj => |obj| obj.type == obj_t,
             else => false,
         };
     }
@@ -57,9 +56,9 @@ pub const Value = union(Type) {
         };
     }
 
-    pub inline fn asObj(self: Value, obj_t: ObjType) ?*obj_t.asStruct() {
+    pub inline fn asObj(self: Value, obj_t: ObjType) ?*obj_t.VariantType() {
         return switch (self) {
-            .Obj => @alignCast(@fieldParentPtr("obj", self.Obj)),
+            .Obj => |obj| @alignCast(@fieldParentPtr("obj", obj)),
             else => null,
         };
     }
@@ -69,10 +68,10 @@ pub const Value = union(Type) {
             .Obj => |obj| {
                 if (!other.isObj(obj.type)) return false;
                 switch (obj.type) {
-                    .String => {
-                        const str_a = self.asObj(.String).?;
-                        const str_b = self.asObj(.String).?;
-                        return std.mem.eql(u8, str_a.val, str_b.val);
+                    .String => |t| {
+                        const str_a = self.asObj(t).?;
+                        const str_b = self.asObj(t).?;
+                        return std.mem.eql(u8, str_a.chars, str_b.chars);
                     },
                 }
             },
@@ -116,15 +115,16 @@ test "Value methods" {
     try testing.expectEqual({}, nil2.as(.Nil).?);
     try testing.expectEqual(null, nil1.as(.Bool));
 
-    const str_obj1 = try _obj.String.init(testing.allocator, "hello world");
-    const str_obj2 = try _obj.String.init(testing.allocator, "hello ");
-    const str_obj3 = try _obj.String.init(testing.allocator, "world");
-    const str_obj4 = try str_obj2.concat(testing.allocator, str_obj3);
-    defer str_obj1.deinit(testing.allocator);
-    defer str_obj2.deinit(testing.allocator);
-    defer str_obj3.deinit(testing.allocator);
-    defer str_obj4.deinit(testing.allocator);
-    const str1 = Value{ .Obj = &str_obj1.obj };
+    const vm = @constCast(&@import("vm.zig").VM.init(testing.allocator));
+    const str_obj1 = try _obj.String.init(vm, "hello world");
+    const str_obj2 = try _obj.String.init(vm, "hello ");
+    const str_obj3 = try _obj.String.init(vm, "world");
+    const str_obj4 = try str_obj2.concat(vm, str_obj3);
+    defer str_obj1.deinit(vm);
+    defer str_obj2.deinit(vm);
+    defer str_obj3.deinit(vm);
+    defer str_obj4.deinit(vm);
+    const str1 = Value{ .Obj = @ptrCast(str_obj1) };
     const str2 = Value{ .Obj = &str_obj4.obj };
     try testing.expect(str1.eql(str2));
     try testing.expect(str1.isObj(.String));
