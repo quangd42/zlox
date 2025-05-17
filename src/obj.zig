@@ -4,7 +4,7 @@ const VM = @import("vm.zig").VM;
 
 pub const Obj = struct {
     type: Type,
-    isConst: bool,
+    is_const: bool,
 
     next: ?*Obj = null,
 
@@ -34,16 +34,30 @@ pub const String = struct {
     chars: []const u8,
 
     pub fn init(vm: *VM, chars: []const u8) !*String {
+        return allocate(vm, chars, true);
+    }
+
+    pub fn deinit(self: *String, vm: *VM) void {
+        if (!self.obj.is_const) vm.allocator.free(self.chars);
+        vm.allocator.destroy(self);
+    }
+
+    fn allocate(vm: *VM, chars: []const u8, is_const: bool) !*String {
         const out = try vm.allocator.create(String);
-        const obj: Obj = .{ .type = .String, .isConst = true, .next = vm.objects };
-        out.* = .{ .obj = obj, .chars = chars };
+        out.* = .{ .obj = .{
+            .type = .String,
+            .is_const = is_const,
+            .next = vm.objects,
+        }, .chars = chars };
         vm.objects = &out.obj;
         return out;
     }
 
-    pub fn deinit(self: *String, vm: *VM) void {
-        if (!self.obj.isConst) vm.allocator.free(self.chars);
-        vm.allocator.destroy(self);
+    pub fn concat(self: *String, vm: *VM, other: *String) !*String {
+        const buffer = try vm.allocator.alloc(u8, self.chars.len + other.chars.len);
+        @memcpy(buffer[0..self.chars.len], self.chars);
+        @memcpy(buffer[self.chars.len..][0..other.chars.len], other.chars);
+        return allocate(vm, buffer, false);
     }
 
     pub fn format(
@@ -54,34 +68,21 @@ pub const String = struct {
     ) !void {
         try writer.print("{s}", .{self.chars});
     }
-
-    pub fn concat(self: *String, vm: *VM, other: *String) !*String {
-        const out = try vm.allocator.create(String);
-        const buffer = try vm.allocator.alloc(u8, self.chars.len + other.chars.len);
-        @memcpy(buffer[0..self.chars.len], self.chars);
-        @memcpy(buffer[self.chars.len..][0..other.chars.len], other.chars);
-        out.* = .{
-            .obj = .{ .type = .String, .isConst = false, .next = vm.objects },
-            .chars = buffer,
-        };
-        vm.objects = &out.obj;
-        return out;
-    }
 };
 
+const testing = std.testing;
 test "concatenate strings" {
-    const testing = std.testing;
-    const vm: *VM = @constCast(&VM.init(testing.allocator));
+    var vm = VM.init(testing.allocator);
     const original_str: []const u8 = "Hello ";
-    const a_str = try String.init(vm, original_str);
-    const b_str = try String.init(vm, "world!");
-    const out = try a_str.concat(vm, b_str);
-    defer b_str.deinit(vm);
-    defer out.deinit(vm);
+    const a_str = try String.init(&vm, original_str);
+    const b_str = try String.init(&vm, "world!");
+    const out = try a_str.concat(&vm, b_str);
+    defer b_str.deinit(&vm);
+    defer out.deinit(&vm);
     // Expect new string has all the right chars
     try testing.expectEqualSlices(u8, "Hello world!", out.chars);
     // Make sure that the "const" source string was not accidentally freed
     // when a_str is freed
-    a_str.deinit(vm);
+    a_str.deinit(&vm);
     try testing.expectEqualStrings("Hello ", original_str);
 }

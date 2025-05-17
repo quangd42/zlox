@@ -30,7 +30,7 @@ pub const Value = union(Type) {
             .Number => |val| try writer.print("{d}", .{val}),
             .Obj => |obj| {
                 switch (obj.type) {
-                    .String => try writer.print("{s}", .{self.asObj(obj.type).?}),
+                    .String => try writer.print("{?}", .{self.asObj(obj.type)}),
                 }
             },
         }

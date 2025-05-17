@@ -233,13 +233,13 @@ pub const VM = struct {
 };
 
 test "vm deinit" {
-    const vm = @constCast(&VM.init(testing.allocator));
+    var vm = VM.init(testing.allocator);
     defer vm.deinit(); // Expect this to free all string allocations
     const String = @import("obj.zig").String;
 
     const original_str: []const u8 = "Hello ";
-    const a_str = try String.init(vm, original_str);
-    const b_str = try String.init(vm, "world!");
-    const out = try a_str.concat(vm, b_str);
+    const a_str = try String.init(&vm, original_str);
+    const b_str = try String.init(&vm, "world!");
+    const out = try a_str.concat(&vm, b_str);
     try testing.expectEqualSlices(u8, "Hello world!", out.chars);
 }
