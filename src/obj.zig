@@ -31,6 +31,7 @@ pub const Type = enum {
 
 pub const String = struct {
     obj: Obj,
+    hash: u32,
     chars: []const u8,
 
     pub fn init(vm: *VM, chars: []const u8) !*String {
@@ -44,11 +45,12 @@ pub const String = struct {
 
     fn allocate(vm: *VM, chars: []const u8, is_const: bool) !*String {
         const out = try vm.allocator.create(String);
-        out.* = .{ .obj = .{
-            .type = .String,
-            .is_const = is_const,
-            .next = vm.objects,
-        }, .chars = chars };
+        const hash = fnvHash(chars);
+        out.* = .{
+            .hash = hash,
+            .chars = chars,
+            .obj = .{ .type = .String, .is_const = is_const, .next = vm.objects },
+        };
         vm.objects = &out.obj;
         return out;
     }
@@ -58,6 +60,11 @@ pub const String = struct {
         @memcpy(buffer[0..self.chars.len], self.chars);
         @memcpy(buffer[self.chars.len..][0..other.chars.len], other.chars);
         return allocate(vm, buffer, false);
+    }
+
+    // TODO: delete after string interning
+    pub fn eql(self: *String, other: *String) bool {
+        return std.mem.eql(u8, self.chars, other.chars);
     }
 
     pub fn format(
@@ -85,4 +92,19 @@ test "concatenate strings" {
     // when a_str is freed
     a_str.deinit(&vm);
     try testing.expectEqualStrings("Hello ", original_str);
+}
+
+fn fnvHash(key: []const u8) u32 {
+    var hash: u32 = 2166136261;
+    for (key) |c| {
+        hash ^= c;
+        hash *%= 16777619;
+    }
+    return hash;
+}
+
+test "fnv hash" {
+    const stdfnv = std.hash.Fnv1a_32;
+    try testing.expect(fnvHash("foobar") == 0xbf9cf968);
+    try testing.expectEqual(stdfnv.hash("foobar"), fnvHash("foobar"));
 }
