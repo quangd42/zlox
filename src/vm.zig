@@ -88,7 +88,7 @@ pub const VM = struct {
     fn interpret(self: *VM, source: []const u8) !void {
         self.resetStack();
 
-        var chunk = Chunk.init(self.allocator);
+        var chunk = try Chunk.init(self.allocator);
         defer chunk.deinit();
 
         var compiler = Compiler.init(self, source, &chunk);
@@ -113,7 +113,6 @@ pub const VM = struct {
             const instruction: _chunk.OpCode = @enumFromInt(self.readByte());
             switch (instruction) {
                 .CONSTANT => try self.push(self.readConstant()),
-                .CONSTANT_LONG => try self.push(self.readConstantLong()),
                 .NIL => try self.push(Value.Nil),
                 .TRUE => try self.push(.{ .Bool = true }),
                 .FALSE => try self.push(.{ .Bool = false }),
@@ -123,8 +122,8 @@ pub const VM = struct {
                 .LESS => try self.binaryOp(.LESS),
                 .LESS_EQUAL => try self.binaryOp(.LESS_EQUAL),
                 .ADD => {
-                    const rhs = self.peek(0);
-                    const lhs = self.peek(1);
+                    const rhs = self.peek(0).?;
+                    const lhs = self.peek(1).?;
                     if (rhs.is(.Number) and lhs.is(.Number)) {
                         try self.binaryOp(.ADD);
                     } else {
@@ -155,27 +154,28 @@ pub const VM = struct {
 
     fn readByte(self: *VM) u8 {
         defer self.ip += 1;
-        return self.chunk.getByteAt(self.ip) catch unreachable;
+        return self.chunk.getByteAt(self.ip);
     }
 
     fn readConstant(self: *VM) Value {
         const constant_idx = self.readByte();
-        return self.chunk.getConstantAt(constant_idx) catch unreachable;
+        return self.chunk.getConstantAt(constant_idx);
     }
 
-    fn readConstantLong(self: *VM) Value {
-        defer self.ip += 3;
-        const byte1: u24 = self.chunk.getByteAt(self.ip) catch unreachable;
-        const byte2: u24 = self.chunk.getByteAt(self.ip + 1) catch unreachable;
-        const byte3: u24 = self.chunk.getByteAt(self.ip + 2) catch unreachable;
-        const idx: u24 = byte1 | @as(u24, byte2) << 8 | @as(u24, byte3) << 16;
-        return self.chunk.getConstantAt(idx) catch unreachable;
+    // fn readConstantLong(self: *VM) Value {
+    //     defer self.ip += 3;
+    //     const byte1: u24 = self.chunk.getByteAt(self.ip);
+    //     const byte2: u24 = self.chunk.getByteAt(self.ip + 1);
+    //     const byte3: u24 = self.chunk.getByteAt(self.ip + 2);
+    //     const idx: u24 = byte1 | @as(u24, byte2) << 8 | @as(u24, byte3) << 16;
+    //     return self.chunk.getConstantAt(idx);
+    // }
     }
 
-    fn peek(self: *VM, distance: usize) Value {
+    fn peek(self: *VM, distance: usize) ?Value {
         const len = self.stack.items.len;
-        const idx = if (distance > len - 1) 0 else len - 1 - distance;
-        return self.stack.items[idx];
+        if (len == 0 or distance > len - 1) return null;
+        return self.stack.items[len - 1 - distance];
     }
 
     fn pop(self: *VM) ?Value {

@@ -23,11 +23,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         print("   | ", .{});
     }
 
-    const byte: u8 = chunk.getByteAt(offset) catch unreachable;
-    const oc: OpCode = @enumFromInt(byte);
+    const oc: OpCode = @enumFromInt(chunk.getByteAt(offset));
     return switch (oc) {
         .CONSTANT => |tag| constantInstruction(@tagName(tag), chunk, offset),
-        .CONSTANT_LONG => |tag| constantLongInstruction(@tagName(tag), chunk, offset),
         else => |tag| simpleInstruction(@tagName(tag), offset),
     };
 }
@@ -38,17 +36,15 @@ fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     return offset + 2;
 }
 
-fn constantLongInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
-    const byte1: u24 = @intCast(chunk.code.items[offset + 1]);
-    const byte2: u24 = @intCast(chunk.code.items[offset + 2]);
-    const byte3: u24 = @intCast(chunk.code.items[offset + 3]);
-    const constant_idx: u24 = byte1 | byte2 << 8 | byte3 << 16;
+// fn constInstructionLong(oc: OpCode, chunk: *Chunk, offset: usize) usize {
+//     const byte1: u24 = @intCast(chunk.code.items[offset + 1]);
+//     const byte2: u24 = @intCast(chunk.code.items[offset + 2]);
+//     const byte3: u24 = @intCast(chunk.code.items[offset + 3]);
+//     const constant_idx: u24 = byte1 | byte2 << 8 | byte3 << 16;
+//
+//     print("{s:-<16} {d:4} '{}'\n", .{ @tagName(oc), constant_idx, chunk.constants.items[constant_idx] });
+//     return offset + 4;
+// }
 
-    print("{s:-<16} {d:4} '{}'\n", .{ name, constant_idx, chunk.constants.items[constant_idx] });
-    return offset + 2;
-}
-
-fn simpleInstruction(name: []const u8, offset: usize) usize {
-    print("{s}\n", .{name});
     return offset + 1;
 }

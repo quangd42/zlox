@@ -40,29 +40,24 @@ pub const Compiler = struct {
     pub fn compile(self: *Compiler) !void {
         try self.expression();
         self.consume(.EOF, "Expect end of expression.");
-        try self.emitOpCode(.RETURN);
+        self.emitOpCode(.RETURN);
         if (dbg and self.parser.had_error) {
             debug.disassembleChunk(self.chunk, "code");
         }
         if (self.parser.had_error) return error.ParsingError;
     }
 
-    fn emitByte(self: *Compiler, byte: u8) Allocator.Error!void {
-        try self.chunk.writeByte(byte, self.parser.previous.line);
+    fn emitByte(self: *Compiler, byte: u8) void {
+        self.chunk.writeByte(byte, self.parser.previous.line);
     }
 
-    fn emitOpCode(self: *Compiler, oc: OpCode) Allocator.Error!void {
-        try self.emitByte(@intFromEnum(oc));
+    fn emitOpCode(self: *Compiler, oc: OpCode) void {
+        self.emitByte(@intFromEnum(oc));
     }
 
-    fn emitConstant(self: *Compiler, value: Value) Allocator.Error!void {
-        self.chunk.writeConstant(value, self.parser.previous.line) catch |err| switch (err) {
-            error.TooManyConstants => {
-                self.errorAtPrev("Too many constants in one chunk.");
-                return;
-            },
-            else => return error.OutOfMemory,
-        };
+    fn emitConstant(self: *Compiler, value: Value) void {
+        const const_idx = self.chunk.addConstant(value);
+        self.chunk.writeConstant(const_idx, self.parser.previous.line);
     }
 
     fn advance(self: *Compiler) void {
@@ -227,51 +222,51 @@ test "test parse rule table" {
     try testing.expectEqual(unary, minus.prefix);
 }
 
-// Parse Fns
+// Parse Fns: expressions
 
-fn number(self: *Compiler) Allocator.Error!void {
-    const val = std.fmt.parseFloat(f64, self.parser.previous.lexeme) catch |err| {
+fn number(c: *Compiler) Allocator.Error!void {
+    const val = std.fmt.parseFloat(f64, c.parser.previous.lexeme) catch |err| {
         print("{any}: ", .{err});
         @panic("failed to parse number literal.");
     };
-    try self.emitConstant(.{ .Number = val });
+    c.emitConstant(.{ .Number = val });
 }
 
-fn grouping(self: *Compiler) Allocator.Error!void {
-    try self.expression();
-    self.consume(.RIGHT_PAREN, "Expect ')' after expression.");
+fn grouping(c: *Compiler) Allocator.Error!void {
+    try c.expression();
+    c.consume(.RIGHT_PAREN, "Expect ')' after expression.");
 }
 
-fn unary(self: *Compiler) Allocator.Error!void {
-    const operator_type = self.parser.previous.type;
-    try self.parsePrecedence(.UNARY);
+fn unary(c: *Compiler) Allocator.Error!void {
+    const operator_type = c.parser.previous.type;
+    try c.parsePrecedence(.UNARY);
 
     switch (operator_type) {
-        .MINUS => try self.emitOpCode(.NEGATE),
-        .BANG => try self.emitOpCode(.NOT),
+        .MINUS => c.emitOpCode(.NEGATE),
+        .BANG => c.emitOpCode(.NOT),
         else => unreachable,
     }
 }
 
-fn binary(self: *Compiler) Allocator.Error!void {
-    const operator_type = self.parser.previous.type;
-    const target_prec_int = @intFromEnum(self.rules.get(operator_type).precedence) + 1;
-    try self.parsePrecedence(@enumFromInt(target_prec_int));
+fn binary(c: *Compiler) Allocator.Error!void {
+    const operator_type = c.parser.previous.type;
+    const target_prec_int = @intFromEnum(Rules.get(operator_type).precedence) + 1;
+    try c.parsePrecedence(@enumFromInt(target_prec_int));
 
     switch (operator_type) {
-        .PLUS => try self.emitOpCode(.ADD),
-        .MINUS => try self.emitOpCode(.SUBTRACT),
-        .STAR => try self.emitOpCode(.MULTIPLY),
-        .SLASH => try self.emitOpCode(.DIVIDE),
-        .EQUAL_EQUAL => try self.emitOpCode(.EQUAL),
+        .PLUS => c.emitOpCode(.ADD),
+        .MINUS => c.emitOpCode(.SUBTRACT),
+        .STAR => c.emitOpCode(.MULTIPLY),
+        .SLASH => c.emitOpCode(.DIVIDE),
+        .EQUAL_EQUAL => c.emitOpCode(.EQUAL),
         .BANG_EQUAL => {
-            try self.emitOpCode(.EQUAL);
-            try self.emitOpCode(.NOT);
+            c.emitOpCode(.EQUAL);
+            c.emitOpCode(.NOT);
         },
-        .GREATER => try self.emitOpCode(.GREATER),
-        .GREATER_EQUAL => try self.emitOpCode(.GREATER_EQUAL),
-        .LESS => try self.emitOpCode(.LESS),
-        .LESS_EQUAL => try self.emitOpCode(.LESS_EQUAL),
+        .GREATER => c.emitOpCode(.GREATER),
+        .GREATER_EQUAL => c.emitOpCode(.GREATER_EQUAL),
+        .LESS => c.emitOpCode(.LESS),
+        .LESS_EQUAL => c.emitOpCode(.LESS_EQUAL),
         else => |tt| {
             if (dbg) print("{}\n", .{tt});
             unreachable;
@@ -279,17 +274,17 @@ fn binary(self: *Compiler) Allocator.Error!void {
     }
 }
 
-fn literal(self: *Compiler) Allocator.Error!void {
-    switch (self.parser.previous.type) {
-        .FALSE => try self.emitOpCode(.FALSE),
-        .NIL => try self.emitOpCode(.NIL),
-        .TRUE => try self.emitOpCode(.TRUE),
+fn literal(c: *Compiler) Allocator.Error!void {
+    switch (c.parser.previous.type) {
+        .FALSE => c.emitOpCode(.FALSE),
+        .NIL => c.emitOpCode(.NIL),
+        .TRUE => c.emitOpCode(.TRUE),
         else => unreachable,
     }
 }
 
-fn string(self: *Compiler) Allocator.Error!void {
-    const prev = &self.parser.previous;
-    const str_obj = try _obj.String.init(self.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
-    try self.emitConstant(.{ .Obj = &str_obj.obj });
+fn string(c: *Compiler) Allocator.Error!void {
+    const prev = &c.parser.previous;
+    const str_obj = try ObjString.init(c.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
+    c.emitConstant(.{ .Obj = &str_obj.obj });
 }
