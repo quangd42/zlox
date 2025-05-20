@@ -93,11 +93,20 @@ const Table = struct {
                 if (tombstone == null) tombstone = entry;
                 continue;
             }
-            // TODO: string interning
             if (entry.*.?.key.?.eql(key)) {
                 // found matching entry
                 return entry;
             }
+
+    pub fn findString(self: *Self, chars: []const u8, hash: u32) ?*ObjString {
+        const entries = self.entries;
+        if (entries.len == 0) return null;
+        var idx = hash % entries.len;
+        while (true) : (idx = (idx + 1) % entries.len) {
+            const entry = entries[idx];
+            const e = entry orelse return null;
+            const key = e.key orelse continue;
+            if (key.chars.len == chars.len and key.hash == hash and key.chars.ptr == chars.ptr) return key;
         }
     }
 };

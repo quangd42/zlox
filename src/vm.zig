@@ -10,6 +10,7 @@ const OpCode = _chunk.OpCode;
 const Compiler = @import("compiler.zig").Compiler;
 const debug = @import("debug.zig");
 const Obj = @import("obj.zig").Obj;
+const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
 
 pub const InterpretError = error{
@@ -22,15 +23,18 @@ pub const VM = struct {
     stack: std.ArrayList(Value),
     chunk: *Chunk = undefined,
     objects: ?*Obj = null,
+    strings: Table,
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) VM {
         return VM{
             .stack = std.ArrayList(Value).init(allocator),
+            .strings = Table.init(allocator),
             .allocator = allocator,
         };
     }
     pub fn deinit(vm: *VM) void {
+        vm.strings.deinit();
         var object = vm.objects;
         while (object != null) {
             const next = object.?.next;

@@ -35,7 +35,10 @@ pub const String = struct {
     chars: []const u8,
 
     pub fn init(vm: *VM, chars: []const u8) !*String {
-        return allocate(vm, chars, true);
+        const hash = fnvHash(chars);
+        const interned = vm.strings.findString(chars, hash);
+        if (interned) |s| return s;
+        return allocate(vm, chars, true, hash);
     }
 
     pub fn deinit(self: *String, vm: *VM) void {
@@ -43,15 +46,15 @@ pub const String = struct {
         vm.allocator.destroy(self);
     }
 
-    fn allocate(vm: *VM, chars: []const u8, is_const: bool) !*String {
+    fn allocate(vm: *VM, chars: []const u8, is_const: bool, hash: u32) !*String {
         const out = try vm.allocator.create(String);
-        const hash = fnvHash(chars);
         out.* = .{
             .hash = hash,
             .chars = chars,
             .obj = .{ .type = .String, .is_const = is_const, .next = vm.objects },
         };
         vm.objects = &out.obj;
+        _ = try vm.strings.set(out, .{ .Nil = {} });
         return out;
     }
 
@@ -59,12 +62,17 @@ pub const String = struct {
         const buffer = try vm.allocator.alloc(u8, self.chars.len + other.chars.len);
         @memcpy(buffer[0..self.chars.len], self.chars);
         @memcpy(buffer[self.chars.len..][0..other.chars.len], other.chars);
-        return allocate(vm, buffer, false);
+        const hash = fnvHash(buffer);
+        const interned = vm.strings.findString(buffer, hash);
+        if (interned) |s| {
+            vm.allocator.free(buffer);
+            return s;
+        }
+        return allocate(vm, buffer, false, hash);
     }
 
-    // TODO: delete after string interning
     pub fn eql(self: *String, other: *String) bool {
-        return std.mem.eql(u8, self.chars, other.chars);
+        return self.chars.ptr == other.chars.ptr;
     }
 
     pub fn format(
@@ -80,6 +88,9 @@ pub const String = struct {
 const testing = std.testing;
 test "concatenate strings" {
     var vm = VM.init(testing.allocator);
+    // explicitly free table beause all strings are going
+    // to be freed individually in this test
+    defer vm.strings.deinit();
     const original_str: []const u8 = "Hello ";
     const a_str = try String.init(&vm, original_str);
     const b_str = try String.init(&vm, "world!");

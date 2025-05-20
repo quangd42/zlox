@@ -71,7 +71,7 @@ pub const Value = union(Type) {
                     .String => |t| {
                         const str_a = self.asObj(t).?;
                         const str_b = self.asObj(t).?;
-                        return std.mem.eql(u8, str_a.chars, str_b.chars);
+                        return str_a.eql(str_b);
                     },
                 }
             },
