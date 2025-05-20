@@ -12,9 +12,9 @@ const Entry = struct {
     value: Value,
 };
 
-const MAX_LOAD = 0.75;
+const MAX_LOAD_PERCENTAGE = 75;
 
-const Table = struct {
+pub const Table = struct {
     count: usize = 0,
     entries: []?Entry,
     allocator: Allocator,
@@ -32,21 +32,20 @@ const Table = struct {
     }
 
     pub fn set(self: *Self, key: *ObjString, value: Value) !bool {
-        // ...yucky
-        const new_count: f64 = @floatFromInt(@as(u64, self.count) + 1);
-        const current_load = @as(f64, @floatFromInt(self.entries.len)) * @as(f64, MAX_LOAD);
-        if (new_count > current_load) try self.increaseCapacity();
-        const dest = findEntry(self.entries, key);
-        const is_new = dest.* == null;
-        dest.* = .{ .key = key, .value = value };
+        if (self.count + 1 > self.entries.len * MAX_LOAD_PERCENTAGE / 100) {
+            try self.increaseCapacity();
+        }
+        const entry = findEntry(self.entries, key);
+        const is_new = entry.* == null;
         if (is_new) self.count += 1;
+        entry.* = .{ .key = key, .value = value };
         return is_new;
     }
 
     pub fn get(self: *Self, key: *ObjString) ?Value {
         if (self.entries.len == 0) return null;
         const entry = findEntry(self.entries, key);
-        return if (entry.* != null) entry.*.?.value else null;
+        return if (entry.*) |e| e.value else null;
     }
 
     pub fn delete(self: *Self, key: *ObjString) bool {
@@ -83,20 +82,16 @@ const Table = struct {
         var tombstone: ?*?Entry = null;
         while (true) : (idx = (idx + 1) % entries.len) {
             const entry = &entries[idx];
-            if (entry.* == null) {
-                // found empty entry, stop probing and return
-                return if (tombstone != null) tombstone.? else entry;
-            }
-            if (entry.*.?.key == null) {
-                // found tombstone, save it if this is first tombstone
-                // encountered
-                if (tombstone == null) tombstone = entry;
+            // empty entry is the end of the chain, return captured tombstone or it
+            const e = entry.* orelse return if (tombstone) |ts| ts else entry;
+            const k = e.key orelse {
+                // found tombstone, save it if this is first tombstone encountered
+                if (tombstone != null) tombstone = entry;
                 continue;
-            }
-            if (entry.*.?.key.?.eql(key)) {
-                // found matching entry
-                return entry;
-            }
+            };
+            if (k.eql(key)) return entry; // found matching entry
+        }
+    }
 
     pub fn findString(self: *Self, chars: []const u8, hash: u32) ?*ObjString {
         const entries = self.entries;

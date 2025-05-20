@@ -115,15 +115,12 @@ test "Value methods" {
     try testing.expectEqual({}, nil2.as(.Nil).?);
     try testing.expectEqual(null, nil1.as(.Bool));
 
-    const vm = @constCast(&@import("vm.zig").VM.init(testing.allocator));
-    const str_obj1 = try _obj.String.init(vm, "hello world");
-    const str_obj2 = try _obj.String.init(vm, "hello ");
-    const str_obj3 = try _obj.String.init(vm, "world");
-    const str_obj4 = try str_obj2.concat(vm, str_obj3);
-    defer str_obj1.deinit(vm);
-    defer str_obj2.deinit(vm);
-    defer str_obj3.deinit(vm);
-    defer str_obj4.deinit(vm);
+    var vm = @import("vm.zig").VM.init(testing.allocator);
+    defer vm.deinit();
+    const str_obj1 = try _obj.String.init(&vm, "hello world");
+    const str_obj2 = try _obj.String.init(&vm, "hello ");
+    const str_obj3 = try _obj.String.init(&vm, "world");
+    const str_obj4 = try str_obj2.concat(&vm, str_obj3);
     const str1 = Value{ .Obj = @ptrCast(str_obj1) };
     const str2 = Value{ .Obj = &str_obj4.obj };
     try testing.expect(str1.eql(str2));

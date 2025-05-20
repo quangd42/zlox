@@ -36,9 +36,9 @@ pub const VM = struct {
     pub fn deinit(vm: *VM) void {
         vm.strings.deinit();
         var object = vm.objects;
-        while (object != null) {
-            const next = object.?.next;
-            object.?.deinit(vm);
+        while (object) |obj| {
+            const next = obj.next;
+            obj.deinit(vm);
             object = next;
         }
     }
