@@ -17,22 +17,23 @@ pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
 pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     print("{d:0>4} ", .{offset});
 
-    if (offset == 0 or chunk.lines.items[offset] != chunk.lines.items[offset - 1]) {
-        print("{d:>4} ", .{chunk.lines.items[offset]});
+    const lines = chunk.lines.items;
+    if (offset == 0 or lines[offset] != lines[offset - 1]) {
+        print("{d:>4} ", .{lines[offset]});
     } else {
         print("   | ", .{});
     }
 
     const oc: OpCode = @enumFromInt(chunk.getByteAt(offset));
     return switch (oc) {
-        .CONSTANT => |tag| constantInstruction(@tagName(tag), chunk, offset),
-        else => |tag| simpleInstruction(@tagName(tag), offset),
+        .CONSTANT, .DEFINE_GLOBAL, .GET_GLOBAL, .SET_GLOBAL => constantInstruction(oc, chunk, offset),
+        else => simpleInstruction(oc, offset),
     };
 }
 
-fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
-    const constant_idx = chunk.code.items[offset + 1];
-    print("{s:-<16} {d:4} '{}'\n", .{ name, constant_idx, chunk.constants.items[constant_idx] });
+fn constantInstruction(oc: OpCode, chunk: *Chunk, offset: usize) usize {
+    const const_idx = chunk.code.items[offset + 1];
+    print("{s:-<16} {d:4} '{}'\n", .{ @tagName(oc), const_idx, chunk.constants.items[const_idx] });
     return offset + 2;
 }
 
@@ -46,5 +47,7 @@ fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
 //     return offset + 4;
 // }
 
+fn simpleInstruction(oc: OpCode, offset: usize) usize {
+    print("{s}\n", .{@tagName(oc)});
     return offset + 1;
 }

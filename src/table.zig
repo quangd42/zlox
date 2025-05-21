@@ -31,6 +31,7 @@ pub const Table = struct {
         self.allocator.free(self.entries);
     }
 
+    /// returns true if a new entry was added, false otherwise
     pub fn set(self: *Self, key: *ObjString, value: Value) !bool {
         if (self.count + 1 > self.entries.len * MAX_LOAD_PERCENTAGE / 100) {
             try self.increaseCapacity();

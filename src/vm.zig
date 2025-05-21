@@ -7,9 +7,11 @@ const dbg = @import("config").@"debug-trace";
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
 const OpCode = _chunk.OpCode;
+const _obj = @import("obj.zig");
+const Obj = _obj.Obj;
+const ObjString = _obj.String;
 const Compiler = @import("compiler.zig").Compiler;
 const debug = @import("debug.zig");
-const Obj = @import("obj.zig").Obj;
 const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
 
@@ -24,17 +26,20 @@ pub const VM = struct {
     chunk: *Chunk = undefined,
     objects: ?*Obj = null,
     strings: Table,
+    globals: Table,
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) VM {
         return VM{
             .stack = std.ArrayList(Value).init(allocator),
             .strings = Table.init(allocator),
+            .globals = Table.init(allocator),
             .allocator = allocator,
         };
     }
     pub fn deinit(vm: *VM) void {
         vm.strings.deinit();
+        vm.globals.deinit();
         var object = vm.objects;
         while (object) |obj| {
             const next = obj.next;
@@ -116,6 +121,28 @@ pub const VM = struct {
                 .NIL => try self.push(Value.Nil),
                 .TRUE => try self.push(.{ .Bool = true }),
                 .FALSE => try self.push(.{ .Bool = false }),
+                .POP => _ = self.pop(),
+                .GET_GLOBAL => {
+                    const name = self.readString();
+                    const val = self.globals.get(name) orelse {
+                        self.runtimeError("Undefined variable '{s}'.", .{name.chars});
+                        return InterpretError.RuntimeError;
+                    };
+                    try self.push(val);
+                },
+                .DEFINE_GLOBAL => {
+                    const name = self.readString();
+                    _ = try self.globals.set(name, self.peek(0).?);
+                    _ = self.pop(); // see book for why
+                },
+                .SET_GLOBAL => {
+                    const name = self.readString();
+                    if (try self.globals.set(name, self.peek(0).?)) {
+                        _ = self.globals.delete(name);
+                        self.runtimeError("Undefined variable '{s}'.", .{name.chars});
+                        return InterpretError.RuntimeError;
+                    }
+                },
                 .EQUAL => try self.equalOp(),
                 .GREATER => try self.binaryOp(.GREATER),
                 .GREATER_EQUAL => try self.binaryOp(.GREATER_EQUAL),
@@ -138,8 +165,11 @@ pub const VM = struct {
                 .DIVIDE => try self.binaryOp(.DIVIDE),
                 .NOT => try self.push(.{ .Bool = self.pop().?.isFalsey() }),
                 .NEGATE => try self.negateOp(),
+                .PRINT => std.io.getStdOut().writer().print("{?}\n", .{self.pop()}) catch {
+                    return InterpretError.RuntimeError;
+                },
                 .RETURN => {
-                    std.debug.print("{}\n", .{self.pop().?});
+                    // std.debug.print("{}\n", .{self.pop().?});
                     return;
                 },
             }
@@ -170,6 +200,10 @@ pub const VM = struct {
     //     const idx: u24 = byte1 | @as(u24, byte2) << 8 | @as(u24, byte3) << 16;
     //     return self.chunk.getConstantAt(idx);
     // }
+
+    fn readString(self: *VM) *ObjString {
+        const const_idx = self.readByte();
+        return self.chunk.getConstantAt(const_idx).asObj(.String).?;
     }
 
     fn peek(self: *VM, distance: usize) ?Value {

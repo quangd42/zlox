@@ -8,9 +8,10 @@ const dbg = if (@import("builtin").is_test) true else @import("config").@"debug-
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
 const OpCode = _chunk.OpCode;
-const debug = @import("debug.zig");
 const _obj = @import("obj.zig");
 const Obj = _obj.Obj;
+const ObjString = _obj.String;
+const debug = @import("debug.zig");
 const scanner = @import("scanner.zig");
 const Scanner = scanner.Scanner;
 const Token = scanner.Token;
@@ -36,8 +37,8 @@ pub const Compiler = struct {
     }
 
     pub fn compile(self: *Compiler) !void {
-        try self.expression();
-        self.consume(.EOF, "Expect end of expression.");
+        while (!self.match(.EOF)) try self.declaration();
+        self.consume(.EOF, "Expect end of statement.");
         self.emitOpCode(.RETURN);
         if (dbg and self.parser.had_error) {
             debug.disassembleChunk(self.chunk, "code");
@@ -76,6 +77,12 @@ pub const Compiler = struct {
         self.advance();
     }
 
+    fn match(self: *Compiler, expected: TokenType) bool {
+        if (self.parser.current.type != expected) return false;
+        self.advance();
+        return true;
+    }
+
     fn errorAtPrev(self: *Compiler, message: []const u8) void {
         self.errorAt(&self.parser.previous, message);
     }
@@ -97,33 +104,91 @@ pub const Compiler = struct {
         self.parser.panic_mode = true;
     }
 
+    fn synchronize(self: *Compiler) void {
+        const parser = &self.parser;
+        parser.panic_mode = false;
+
+        while (parser.current.type != .EOF) : (self.advance()) {
+            if (parser.previous.type == .SEMICOLON) return;
+            switch (parser.current.type) {
+                .CLASS, .FUN, .VAR, .FOR, .IF, .WHILE, .PRINT, .RETURN => return,
+                else => {},
+            }
+        }
+    }
+
     fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
         self.advance();
         const prefixFn = Rules.get(self.parser.previous.type).prefix orelse {
             self.errorAtPrev("Expect expression.");
             return;
         };
-        try prefixFn(self);
+        const can_assign = precedence.isLessEql(.ASSIGNMENT);
+        try prefixFn(self, can_assign);
 
-        while (@intFromEnum(precedence) <= @intFromEnum(Rules.get(self.parser.current.type).precedence)) {
+        while (precedence.isLessEql(Rules.get(self.parser.current.type).precedence)) {
             self.advance();
             const infixFn = Rules.get(self.parser.previous.type).infix orelse {
                 self.errorAtPrev("Expect infix operator.");
                 return;
             };
-            try infixFn(self);
+            try infixFn(self, can_assign);
         }
     }
 
     fn expression(self: *Compiler) !void {
         try self.parsePrecedence(.ASSIGNMENT);
     }
+
+    fn declaration(self: *Compiler) !void {
+        const tok = self.parser.current;
+        switch (tok.type) {
+            .VAR => try self.varDeclaration(),
+            else => try self.statement(),
+        }
+        if (self.parser.panic_mode) self.synchronize();
+    }
+
+    fn varDeclaration(self: *Compiler) !void {
+        self.advance(); // VAR keyword
+        self.consume(.IDENTIFIER, "Expect variable name.");
+        const ident_idx = try makeIdentConstant(self, self.parser.previous.lexeme);
+        if (self.match(.EQUAL)) {
+            try self.expression();
+        } else {
+            self.emitOpCode(.NIL);
+        }
+        self.consume(.SEMICOLON, "Expect ';' after variable declaration.");
+        defineVariable(self, ident_idx);
+    }
+
+    fn statement(self: *Compiler) !void {
+        const tok = self.parser.current;
+        switch (tok.type) {
+            .PRINT => try self.printStatement(),
+            else => try self.expressionStatement(),
+        }
+    }
+
+    fn printStatement(c: *Compiler) !void {
+        c.advance();
+        try c.expression();
+        c.consume(.SEMICOLON, "Expect ';' after value.");
+        c.emitOpCode(.PRINT);
+    }
+
+    fn expressionStatement(c: *Compiler) !void {
+        try c.expression();
+        c.consume(.SEMICOLON, "Expect ';' after value.");
+        c.emitOpCode(.POP);
+    }
 };
 
 test "compiler init & parse simple expression" {
     const source = "1 + 275";
+    var vm = @import("vm.zig").VM.init(testing.allocator);
     var chunk = Chunk.init(testing.allocator);
-    var compiler = Compiler.init(testing.allocator, source, &chunk);
+    var compiler = Compiler.init(&vm, source, &chunk);
     try testing.expect(std.mem.eql(u8, compiler.parser.current.lexeme, "1"));
     compiler.advance();
     try testing.expect(std.mem.eql(u8, compiler.parser.previous.lexeme, "1"));
@@ -155,9 +220,13 @@ const Precedence = enum {
     UNARY, // ! -
     CALL, // . ()
     PRIMARY,
+
+    fn isLessEql(self: Precedence, other: Precedence) bool {
+        return @intFromEnum(self) <= @intFromEnum(other);
+    }
 };
 
-const ParseFn = *const fn (*Compiler) Allocator.Error!void;
+const ParseFn = *const fn (*Compiler, bool) Allocator.Error!void;
 const ParseRule = struct {
     infix: ?ParseFn = null,
     prefix: ?ParseFn = null,
@@ -187,7 +256,7 @@ const Rules = ParseRuleArray.init(.{
     .LESS = .{ .infix = binary, .precedence = .COMPARISON },
     .LESS_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
     // Literals.
-    .IDENTIFIER = .{},
+    .IDENTIFIER = .{ .prefix = variable },
     .STRING = .{ .prefix = string },
     .NUMBER = .{ .prefix = number },
     // Keywords.
@@ -221,7 +290,8 @@ test "test parse rule table" {
 
 // Parse Fns: expressions
 
-fn number(c: *Compiler) Allocator.Error!void {
+fn number(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
     const val = std.fmt.parseFloat(f64, c.parser.previous.lexeme) catch |err| {
         print("{any}: ", .{err});
         @panic("failed to parse number literal.");
@@ -229,12 +299,14 @@ fn number(c: *Compiler) Allocator.Error!void {
     c.emitConstant(.{ .Number = val });
 }
 
-fn grouping(c: *Compiler) Allocator.Error!void {
+fn grouping(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
     try c.expression();
     c.consume(.RIGHT_PAREN, "Expect ')' after expression.");
 }
 
-fn unary(c: *Compiler) Allocator.Error!void {
+fn unary(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
     const operator_type = c.parser.previous.type;
     try c.parsePrecedence(.UNARY);
 
@@ -245,7 +317,8 @@ fn unary(c: *Compiler) Allocator.Error!void {
     }
 }
 
-fn binary(c: *Compiler) Allocator.Error!void {
+fn binary(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
     const operator_type = c.parser.previous.type;
     const target_prec_int = @intFromEnum(Rules.get(operator_type).precedence) + 1;
     try c.parsePrecedence(@enumFromInt(target_prec_int));
@@ -271,7 +344,8 @@ fn binary(c: *Compiler) Allocator.Error!void {
     }
 }
 
-fn literal(c: *Compiler) Allocator.Error!void {
+fn literal(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
     switch (c.parser.previous.type) {
         .FALSE => c.emitOpCode(.FALSE),
         .NIL => c.emitOpCode(.NIL),
@@ -280,8 +354,35 @@ fn literal(c: *Compiler) Allocator.Error!void {
     }
 }
 
-fn string(c: *Compiler) Allocator.Error!void {
+fn string(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
     const prev = &c.parser.previous;
     const str_obj = try ObjString.init(c.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
     c.emitConstant(.{ .Obj = &str_obj.obj });
+}
+
+// prefix parseFn for variable
+fn variable(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    try namedVariable(c, c.parser.previous.lexeme, can_assign);
+}
+
+fn namedVariable(c: *Compiler, lexeme: []const u8, can_assign: bool) !void {
+    const idx = try makeIdentConstant(c, lexeme);
+    if (can_assign and c.match(.EQUAL)) {
+        try c.expression();
+        c.emitOpCode(.SET_GLOBAL);
+    } else {
+        c.emitOpCode(.GET_GLOBAL);
+    }
+    c.emitByte(idx);
+}
+
+fn makeIdentConstant(c: *Compiler, lexeme: []const u8) !u8 {
+    const str_obj = try ObjString.init(c.vm, lexeme);
+    return c.chunk.addConstant(.{ .Obj = &str_obj.obj });
+}
+
+fn defineVariable(c: *Compiler, constant_idx: u8) void {
+    c.emitOpCode(.DEFINE_GLOBAL);
+    c.emitByte(constant_idx);
 }
