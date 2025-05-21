@@ -1,11 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const testing = std.testing;
+
 const VM = @import("vm.zig").VM;
 
 pub const Obj = struct {
     type: Type,
-    is_const: bool,
-
     next: ?*Obj = null,
 
     pub fn deinit(self: *Obj, vm: *VM) void {
@@ -38,20 +38,21 @@ pub const String = struct {
         const hash = fnvHash(chars);
         const interned = vm.strings.findString(chars, hash);
         if (interned) |s| return s;
-        return allocate(vm, chars, true, hash);
+        const duped = try vm.allocator.dupe(u8, chars);
+        return allocate(vm, duped, hash);
     }
 
     pub fn deinit(self: *String, vm: *VM) void {
-        if (!self.obj.is_const) vm.allocator.free(self.chars);
+        vm.allocator.free(self.chars);
         vm.allocator.destroy(self);
     }
 
-    fn allocate(vm: *VM, chars: []const u8, is_const: bool, hash: u32) !*String {
+    fn allocate(vm: *VM, chars: []const u8, hash: u32) !*String {
         const out = try vm.allocator.create(String);
         out.* = .{
             .hash = hash,
             .chars = chars,
-            .obj = .{ .type = .String, .is_const = is_const, .next = vm.objects },
+            .obj = .{ .type = .String, .next = vm.objects },
         };
         vm.objects = &out.obj;
         _ = try vm.strings.set(out, .{ .Nil = {} });
@@ -68,7 +69,7 @@ pub const String = struct {
             vm.allocator.free(buffer);
             return s;
         }
-        return allocate(vm, buffer, false, hash);
+        return allocate(vm, buffer, hash);
     }
 
     pub fn eql(self: *String, other: *String) bool {
@@ -85,7 +86,15 @@ pub const String = struct {
     }
 };
 
-const testing = std.testing;
+test "string interning" {
+    var vm = VM.init(testing.allocator);
+    defer vm.deinit();
+    const original_str = "hello world";
+    const a_str = try String.init(&vm, original_str);
+    const b_str = try String.init(&vm, "hello world");
+    try testing.expect(a_str == b_str);
+}
+
 test "concatenate strings" {
     var vm = VM.init(testing.allocator);
     // explicitly free table beause all strings are going

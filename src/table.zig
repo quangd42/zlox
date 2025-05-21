@@ -101,7 +101,9 @@ pub const Table = struct {
             const entry = entries[idx];
             const e = entry orelse return null;
             const key = e.key orelse continue;
-            if (key.chars.len == chars.len and key.hash == hash and key.chars.ptr == chars.ptr) return key;
+            const len_eql = key.chars.len == chars.len;
+            const hash_eql = key.hash == hash;
+            if (len_eql and hash_eql and std.mem.eql(u8, key.chars, chars)) return key;
         }
     }
 };
@@ -139,4 +141,25 @@ test "table ops" {
     // force increaseCap to clear tombstone, expect count = 0
     try table.increaseCapacity();
     try testing.expectEqual(0, table.count);
+}
+
+test "rewrite key" {
+    var vm = VM.init(testing.allocator);
+    defer vm.deinit();
+    const key1 = try ObjString.init(&vm, "hello world");
+    const key2 = try ObjString.init(&vm, "hello ");
+    const key3 = try ObjString.init(&vm, "world");
+    const key4 = try key2.concat(&vm, key3);
+    var set = try vm.globals.set(key1, .{ .Number = 1 });
+    try testing.expect(set);
+    try testing.expectEqual(1, vm.globals.count);
+    set = try vm.globals.set(key4, .{ .Bool = true });
+    try testing.expect(!set);
+    try testing.expectEqual(1, vm.globals.count);
+    var got = vm.globals.get(key1);
+    try testing.expect(got != null);
+    try testing.expectEqual(Value{ .Bool = true }, got.?);
+    got = vm.globals.get(key4);
+    try testing.expect(got != null);
+    try testing.expectEqual(Value{ .Bool = true }, got.?);
 }

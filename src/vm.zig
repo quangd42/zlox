@@ -53,8 +53,8 @@ pub const VM = struct {
         while (true) {
             try stdout.writeAll("> ");
             const input = try stdin.readUntilDelimiterOrEof(&buffer, '\n');
-            if (input) |content| {
-                self.interpret(content) catch continue;
+            if (input) |line| {
+                self.interpret(line) catch continue;
             } else {
                 break;
             }
