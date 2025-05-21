@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const print = std.debug.print;
 const testing = std.testing;
 
-const dbg = @import("config").@"debug-trace";
+const dbg = if (@import("builtin").is_test) true else @import("config").@"debug-trace";
 
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
@@ -23,14 +23,12 @@ pub const Compiler = struct {
     parser: Parser,
     chunk: *Chunk,
     vm: *VM,
-    rules: ParseRuleArray,
 
     pub fn init(vm: *VM, source: []const u8, chunk: *Chunk) Compiler {
         var compiler = Compiler{
             .scanner = Scanner.init(source),
             .parser = Parser{},
             .chunk = chunk,
-            .rules = makeParseRules(), // TODO: make this comptime
             .vm = vm,
         };
         compiler.advance();
@@ -99,19 +97,21 @@ pub const Compiler = struct {
         self.parser.panic_mode = true;
     }
 
-    fn parsePrecedence(self: *Compiler, precedence: Precedence) Allocator.Error!void {
+    fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
         self.advance();
-        const prefixFn = self.rules.get(self.parser.previous.type).prefix;
-        if (prefixFn == null) {
+        const prefixFn = Rules.get(self.parser.previous.type).prefix orelse {
             self.errorAtPrev("Expect expression.");
             return;
-        }
-        try prefixFn.?(self);
+        };
+        try prefixFn(self);
 
-        while (@intFromEnum(precedence) <= @intFromEnum(self.rules.get(self.parser.current.type).precedence)) {
+        while (@intFromEnum(precedence) <= @intFromEnum(Rules.get(self.parser.current.type).precedence)) {
             self.advance();
-            const infixFn = self.rules.get(self.parser.previous.type).infix;
-            try infixFn.?(self);
+            const infixFn = Rules.get(self.parser.previous.type).infix orelse {
+                self.errorAtPrev("Expect infix operator.");
+                return;
+            };
+            try infixFn(self);
         }
     }
 
@@ -164,59 +164,56 @@ const ParseRule = struct {
     precedence: Precedence = .NONE,
 };
 const ParseRuleArray = std.EnumArray(TokenType, ParseRule);
-fn makeParseRules() ParseRuleArray {
-    return ParseRuleArray.init(.{
-        // Single-character tokens.
-        .LEFT_PAREN = .{ .prefix = grouping },
-        .RIGHT_PAREN = .{},
-        .LEFT_BRACE = .{},
-        .RIGHT_BRACE = .{},
-        .COMMA = .{},
-        .DOT = .{},
-        .MINUS = .{ .prefix = unary, .infix = binary, .precedence = .TERM },
-        .PLUS = .{ .infix = binary, .precedence = .TERM },
-        .SEMICOLON = .{},
-        .SLASH = .{ .infix = binary, .precedence = .FACTOR },
-        .STAR = .{ .infix = binary, .precedence = .FACTOR },
-        // One or two character tokens.
-        .BANG = .{ .prefix = unary },
-        .BANG_EQUAL = .{ .infix = binary, .precedence = .EQUALITY },
-        .EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
-        .EQUAL_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
-        .GREATER = .{ .infix = binary, .precedence = .COMPARISON },
-        .GREATER_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
-        .LESS = .{ .infix = binary, .precedence = .COMPARISON },
-        .LESS_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
-        // Literals.
-        .IDENTIFIER = .{},
-        .STRING = .{ .prefix = string },
-        .NUMBER = .{ .prefix = number },
-        // Keywords.
-        .AND = .{},
-        .CLASS = .{},
-        .ELSE = .{},
-        .FALSE = .{ .prefix = literal },
-        .FOR = .{},
-        .FUN = .{},
-        .IF = .{},
-        .NIL = .{ .prefix = literal },
-        .OR = .{},
-        .PRINT = .{},
-        .RETURN = .{},
-        .SUPER = .{},
-        .THIS = .{},
-        .TRUE = .{ .prefix = literal },
-        .VAR = .{},
-        .WHILE = .{},
+const Rules = ParseRuleArray.init(.{
+    // Single-character tokens.
+    .LEFT_PAREN = .{ .prefix = grouping },
+    .RIGHT_PAREN = .{},
+    .LEFT_BRACE = .{},
+    .RIGHT_BRACE = .{},
+    .COMMA = .{},
+    .DOT = .{},
+    .MINUS = .{ .prefix = unary, .infix = binary, .precedence = .TERM },
+    .PLUS = .{ .infix = binary, .precedence = .TERM },
+    .SEMICOLON = .{},
+    .SLASH = .{ .infix = binary, .precedence = .FACTOR },
+    .STAR = .{ .infix = binary, .precedence = .FACTOR },
+    // One or two character tokens.
+    .BANG = .{ .prefix = unary },
+    .BANG_EQUAL = .{ .infix = binary, .precedence = .EQUALITY },
+    .EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
+    .EQUAL_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
+    .GREATER = .{ .infix = binary, .precedence = .COMPARISON },
+    .GREATER_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
+    .LESS = .{ .infix = binary, .precedence = .COMPARISON },
+    .LESS_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
+    // Literals.
+    .IDENTIFIER = .{},
+    .STRING = .{ .prefix = string },
+    .NUMBER = .{ .prefix = number },
+    // Keywords.
+    .AND = .{},
+    .CLASS = .{},
+    .ELSE = .{},
+    .FALSE = .{ .prefix = literal },
+    .FOR = .{},
+    .FUN = .{},
+    .IF = .{},
+    .NIL = .{ .prefix = literal },
+    .OR = .{},
+    .PRINT = .{},
+    .RETURN = .{},
+    .SUPER = .{},
+    .THIS = .{},
+    .TRUE = .{ .prefix = literal },
+    .VAR = .{},
+    .WHILE = .{},
 
-        .ERROR = .{},
-        .EOF = .{},
-    });
-}
+    .ERROR = .{},
+    .EOF = .{},
+});
 
 test "test parse rule table" {
-    const rules = makeParseRules();
-    const minus = rules.get(.MINUS);
+    const minus = Rules.get(.MINUS);
     try testing.expectEqual(.TERM, minus.precedence);
     try testing.expectEqual(binary, minus.infix);
     try testing.expectEqual(unary, minus.prefix);
