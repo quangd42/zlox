@@ -28,6 +28,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     return switch (oc) {
         .CONSTANT, .DEFINE_GLOBAL, .GET_GLOBAL, .SET_GLOBAL => constantInstruction(oc, chunk, offset),
         .SET_LOCAL, .GET_LOCAL => byteInstruction(oc, chunk, offset),
+        .JUMP, .JUMP_IF_FALSE => jumpInstruction(oc, 1, chunk, offset),
         else => simpleInstruction(oc, offset),
     };
 }
@@ -42,6 +43,12 @@ fn byteInstruction(oc: OpCode, chunk: *Chunk, offset: usize) usize {
     const const_idx = chunk.code.items[offset + 1];
     print("{s:-<16} {d:4}\n", .{ @tagName(oc), const_idx });
     return offset + 2;
+}
+
+fn jumpInstruction(oc: OpCode, sign: u16, chunk: *Chunk, offset: usize) usize {
+    const jump = @as(u16, chunk.code.items[offset + 1]) << 8 | @as(u16, @intCast(chunk.code.items[offset + 2]));
+    print("{s:-<16} {d:4} -> {d}\n", .{ @tagName(oc), offset, offset + 3 + sign * jump });
+    return offset + 3;
 }
 
 fn simpleInstruction(oc: OpCode, offset: usize) usize {

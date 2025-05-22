@@ -171,6 +171,15 @@ pub const VM = struct {
                 .PRINT => std.io.getStdOut().writer().print("{?}\n", .{self.pop()}) catch {
                     return InterpretError.RuntimeError;
                 },
+                .JUMP => {
+                    const offset = self.readShort();
+                    std.debug.print("{d}\n", .{offset});
+                    self.ip += offset;
+                },
+                .JUMP_IF_FALSE => {
+                    const offset = self.readShort();
+                    if (self.peek(0).?.isFalsey()) self.ip += offset;
+                },
                 .RETURN => {
                     // std.debug.print("{}\n", .{self.pop().?});
                     return;
@@ -195,14 +204,12 @@ pub const VM = struct {
         return self.chunk.getConstantAt(constant_idx) catch unreachable;
     }
 
-    // fn readConstantLong(self: *VM) Value {
-    //     defer self.ip += 3;
-    //     const byte1: u24 = self.chunk.getByteAt(self.ip);
-    //     const byte2: u24 = self.chunk.getByteAt(self.ip + 1);
-    //     const byte3: u24 = self.chunk.getByteAt(self.ip + 2);
-    //     const idx: u24 = byte1 | @as(u24, byte2) << 8 | @as(u24, byte3) << 16;
-    //     return self.chunk.getConstantAt(idx);
-    // }
+    fn readShort(self: *VM) u16 {
+        defer self.ip += 2;
+        const byte1 = self.chunk.getByteAt(self.ip) catch unreachable;
+        const byte2 = self.chunk.getByteAt(self.ip + 1) catch unreachable;
+        return @as(u16, byte1) << 8 | byte2;
+    }
 
     fn readString(self: *VM) *ObjString {
         const const_idx = self.readByte();

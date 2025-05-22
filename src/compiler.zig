@@ -54,57 +54,89 @@ pub const Compiler = struct {
         if (self.parser.had_error) return error.ParsingError;
     }
 
-    fn emitByte(self: *Compiler, byte: u8) !void {
-        try self.chunk.writeByte(byte, self.parser.previous.line);
+    fn beginScope(c: *Compiler) void {
+        c.scope_depth += 1;
     }
 
-    fn emitOpCode(self: *Compiler, oc: OpCode) !void {
-        try self.emitByte(@intFromEnum(oc));
+    fn endScope(c: *Compiler) !void {
+        c.scope_depth -= 1;
+        while (c.locals.items.len > 0 and c.locals.getLast().depth.? > c.scope_depth) {
+            try c.emitOpCode(.POP);
+            _ = c.locals.pop();
+        }
     }
 
-    fn emitConstant(self: *Compiler, value: Value) !void {
-        const const_idx = self.chunk.addConstant(value);
-        try self.chunk.writeConstant(const_idx, self.parser.previous.line);
+    fn emitByte(c: *Compiler, byte: u8) !void {
+        try c.chunk.writeByte(byte, c.parser.previous.line);
     }
 
-    fn advance(self: *Compiler) void {
-        const parser = &self.parser;
+    fn emitOpCode(c: *Compiler, oc: OpCode) !void {
+        try c.emitByte(@intFromEnum(oc));
+    }
+
+    fn emitJump(c: *Compiler, instr: OpCode) !usize {
+        try c.emitOpCode(instr);
+        try c.emitByte(0xff);
+        try c.emitByte(0xff);
+        return c.chunk.code.items.len - 2;
+    }
+
+    fn emitConstant(c: *Compiler, value: Value) !void {
+        const const_idx = c.chunk.addConstant(value);
+        try c.chunk.writeConstant(const_idx, c.parser.previous.line);
+    }
+
+    fn patchJump(c: *Compiler, offset: usize) void {
+        // distance is how far to jump back after reading the offset
+        // -2 to account for the offset bytes itself
+        const distance = c.chunk.code.items.len - offset - 2;
+
+        if (distance > std.math.maxInt(u16)) {
+            c.errorAtPrev("Too much code to jump over.");
+        }
+
+        c.chunk.code.items[offset] = @as(u8, @intCast((distance >> 8) & 0xff));
+        c.chunk.code.items[offset + 1] = @as(u8, @intCast(distance & 0xff));
+    }
+
+    fn advance(c: *Compiler) void {
+        const parser = &c.parser;
         parser.previous = parser.current;
         while (true) {
-            parser.current = self.scanner.scanToken();
+            parser.current = c.scanner.scanToken();
             if (parser.current.type != .ERROR) break;
-            self.errorAtCurrent(parser.current.lexeme);
+            c.errorAtCurrent(parser.current.lexeme);
         }
     }
 
-    fn consume(self: *Compiler, expected: TokenType, message: []const u8) void {
-        if (!self.check(expected)) {
-            self.errorAtCurrent(message);
+    fn consume(c: *Compiler, expected: TokenType, message: []const u8) void {
+        if (!c.check(expected)) {
+            c.errorAtCurrent(message);
             return;
         }
-        self.advance();
+        c.advance();
     }
 
-    fn match(self: *Compiler, expected: TokenType) bool {
-        if (!self.check(expected)) return false;
-        self.advance();
+    fn match(c: *Compiler, expected: TokenType) bool {
+        if (!c.check(expected)) return false;
+        c.advance();
         return true;
     }
 
-    fn check(self: *Compiler, expected: TokenType) bool {
-        return self.parser.current.type == expected;
+    fn check(c: *Compiler, expected: TokenType) bool {
+        return c.parser.current.type == expected;
     }
 
-    fn errorAtPrev(self: *Compiler, message: []const u8) void {
-        self.errorAt(&self.parser.previous, message);
+    fn errorAtPrev(c: *Compiler, message: []const u8) void {
+        c.errorAt(&c.parser.previous, message);
     }
 
-    fn errorAtCurrent(self: *Compiler, message: []const u8) void {
-        self.errorAt(&self.parser.current, message);
+    fn errorAtCurrent(c: *Compiler, message: []const u8) void {
+        c.errorAt(&c.parser.current, message);
     }
 
-    fn errorAt(self: *Compiler, token: *Token, message: []const u8) void {
-        if (self.parser.panic_mode) return;
+    fn errorAt(c: *Compiler, token: *Token, message: []const u8) void {
+        if (c.parser.panic_mode) return;
         print("[line {d}] Error", .{token.line});
         switch (token.type) {
             .EOF => print(" at end", .{}),
@@ -112,8 +144,8 @@ pub const Compiler = struct {
             else => print(" at '{s}'", .{token.lexeme}),
         }
         print(": {s}\n", .{message});
-        self.parser.had_error = true;
-        self.parser.panic_mode = true;
+        c.parser.had_error = true;
+        c.parser.panic_mode = true;
     }
 
     fn synchronize(self: *Compiler) void {
@@ -148,6 +180,61 @@ pub const Compiler = struct {
         }
     }
 
+    fn makeIdentConstant(c: *Compiler, lexeme: []const u8) !u8 {
+        const str_obj = try ObjString.init(c.vm, lexeme);
+        return c.chunk.addConstant(.{ .Obj = &str_obj.obj });
+    }
+
+    fn addLocal(c: *Compiler, lexeme: []const u8) void {
+        // depth = null to mark local as uninitialized
+        c.locals.appendAssumeCapacity(.{ .lexeme = lexeme, .depth = null });
+    }
+
+    fn resolveLocal(c: *Compiler, lexeme: []const u8) ?u8 {
+        var i = c.locals.items.len;
+        while (i > 0) : (i -= 1) {
+            const local = c.locals.items[i - 1];
+            if (std.mem.eql(u8, local.lexeme, lexeme)) {
+                if (local.depth == null) {
+                    c.errorAtPrev("Can't read local variable in its own initializer.");
+                }
+                return @intCast(i - 1);
+            }
+        }
+        return null;
+    }
+
+    fn declareVariable(c: *Compiler) void {
+        if (c.scope_depth == 0) return; // If global scope just skip
+        var i = c.locals.items.len;
+        while (i > 0) : (i -= 1) {
+            const local = c.locals.items[i - 1];
+            if (local.depth == null or local.depth.? < c.scope_depth) break;
+            if (std.mem.eql(u8, c.parser.previous.lexeme, local.lexeme)) {
+                c.errorAtPrev("Variable with the this name exists in this scope.");
+            }
+        }
+        c.addLocal(c.parser.previous.lexeme);
+    }
+
+    fn parseVariable(c: *Compiler) !u8 {
+        c.consume(.IDENTIFIER, "Expect variable name.");
+        c.declareVariable();
+        if (c.scope_depth > 0) return 0;
+        return makeIdentConstant(c, c.parser.previous.lexeme);
+    }
+
+    fn defineVariable(c: *Compiler, constant_idx: u8) !void {
+        if (c.scope_depth > 0) {
+            // mark variable as initialized
+            c.locals.items[c.locals.items.len - 1].depth = c.scope_depth;
+            return;
+        }
+
+        try c.emitOpCode(.DEFINE_GLOBAL);
+        try c.emitByte(constant_idx);
+    }
+
     fn expression(self: *Compiler) !void {
         try self.parsePrecedence(.ASSIGNMENT);
     }
@@ -173,49 +260,11 @@ pub const Compiler = struct {
         try defineVariable(self, global_idx);
     }
 
-    fn parseVariable(c: *Compiler) !u8 {
-        c.consume(.IDENTIFIER, "Expect variable name.");
-        c.declareVariable();
-        if (c.scope_depth > 0) return 0;
-        return makeIdentConstant(c, c.parser.previous.lexeme);
-    }
-
-    fn declareVariable(c: *Compiler) void {
-        if (c.scope_depth == 0) return; // If global scope just skip
-        var i = c.locals.items.len;
-        while (i > 0) : (i -= 1) {
-            const local = c.locals.items[i - 1];
-            if (local.depth == null or local.depth.? < c.scope_depth) break;
-            if (std.mem.eql(u8, c.parser.previous.lexeme, local.lexeme)) {
-                c.errorAtPrev("Variable with the this name exists in this scope.");
-            }
-        }
-        c.addLocal(c.parser.previous.lexeme);
-    }
-
-    fn addLocal(c: *Compiler, lexeme: []const u8) void {
-        // depth = null to mark local as uninitialized
-        c.locals.appendAssumeCapacity(.{ .lexeme = lexeme, .depth = null });
-    }
-
-    fn resolveLocal(c: *Compiler, lexeme: []const u8) ?u8 {
-        var i = c.locals.items.len;
-        while (i > 0) : (i -= 1) {
-            const local = c.locals.items[i - 1];
-            if (std.mem.eql(u8, local.lexeme, lexeme)) {
-                if (local.depth == null) {
-                    c.errorAtPrev("Can't read local variable in its own initializer.");
-                }
-                return @intCast(i - 1);
-            }
-        }
-        return null;
-    }
-
-    fn statement(self: *Compiler) !void {
+    fn statement(self: *Compiler) Allocator.Error!void {
         const tok = self.parser.current;
         switch (tok.type) {
             .PRINT => try self.printStatement(),
+            .IF => try self.ifStatement(),
             .LEFT_BRACE => {
                 self.beginScope();
                 try self.block();
@@ -246,16 +295,19 @@ pub const Compiler = struct {
         self.consume(.RIGHT_BRACE, "Expect '}' after block.");
     }
 
-    fn beginScope(c: *Compiler) void {
-        c.scope_depth += 1;
-    }
-
-    fn endScope(c: *Compiler) !void {
-        c.scope_depth -= 1;
-        while (c.locals.items.len > 0 and c.locals.getLast().depth.? > c.scope_depth) {
-            try c.emitOpCode(.POP);
-            _ = c.locals.pop();
-        }
+    fn ifStatement(self: *Compiler) !void {
+        self.advance(); // .IF
+        self.consume(.LEFT_PAREN, "Expect '(' after 'if'.");
+        try self.expression();
+        self.consume(.RIGHT_PAREN, "Expect ')' after condition.");
+        const skip_then_loc = try self.emitJump(.JUMP_IF_FALSE);
+        try self.emitOpCode(.POP);
+        try self.statement();
+        const skip_else_loc = try self.emitJump(.JUMP);
+        self.patchJump(skip_then_loc);
+        try self.emitOpCode(.POP);
+        if (self.match(.ELSE)) try self.statement();
+        self.patchJump(skip_else_loc);
     }
 };
 
@@ -444,11 +496,6 @@ fn string(c: *Compiler, can_assign: bool) Allocator.Error!void {
     try c.emitConstant(.{ .Obj = &str_obj.obj });
 }
 
-// prefix parseFn for variable
-fn variable(c: *Compiler, can_assign: bool) Allocator.Error!void {
-    try namedVariable(c, c.parser.previous.lexeme, can_assign);
-}
-
 fn namedVariable(c: *Compiler, lexeme: []const u8, can_assign: bool) !void {
     var getOp: OpCode = .GET_LOCAL;
     var setOp: OpCode = .SET_LOCAL;
@@ -459,7 +506,7 @@ fn namedVariable(c: *Compiler, lexeme: []const u8, can_assign: bool) !void {
     } else {
         getOp = .GET_GLOBAL;
         setOp = .SET_GLOBAL;
-        const_idx = try makeIdentConstant(c, lexeme);
+        const_idx = try c.makeIdentConstant(lexeme);
     }
     if (can_assign and c.match(.EQUAL)) {
         try c.expression();
@@ -470,18 +517,7 @@ fn namedVariable(c: *Compiler, lexeme: []const u8, can_assign: bool) !void {
     try c.emitByte(const_idx);
 }
 
-fn makeIdentConstant(c: *Compiler, lexeme: []const u8) !u8 {
-    const str_obj = try ObjString.init(c.vm, lexeme);
-    return c.chunk.addConstant(.{ .Obj = &str_obj.obj });
-}
-
-fn defineVariable(c: *Compiler, constant_idx: u8) !void {
-    if (c.scope_depth > 0) {
-        // mark variable as initialized
-        c.locals.items[c.locals.items.len - 1].depth = c.scope_depth;
-        return;
-    }
-
-    try c.emitOpCode(.DEFINE_GLOBAL);
-    try c.emitByte(constant_idx);
+// prefix parseFn for variable
+fn variable(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    try namedVariable(c, c.parser.previous.lexeme, can_assign);
 }
