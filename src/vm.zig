@@ -96,7 +96,8 @@ pub const VM = struct {
         var chunk = try Chunk.init(self.allocator);
         defer chunk.deinit();
 
-        var compiler = Compiler.init(self, source, &chunk);
+        var compiler = try Compiler.init(self, source, &chunk);
+        defer compiler.deinit();
         compiler.compile() catch return InterpretError.CompileError;
 
         self.chunk = &chunk;
@@ -122,6 +123,8 @@ pub const VM = struct {
                 .TRUE => try self.push(.{ .Bool = true }),
                 .FALSE => try self.push(.{ .Bool = false }),
                 .POP => _ = self.pop(),
+                .GET_LOCAL => try self.push(self.stack.items[self.readByte()]),
+                .SET_LOCAL => self.stack.items[self.readByte()] = self.peek(0).?,
                 .GET_GLOBAL => {
                     const name = self.readString();
                     const val = self.globals.get(name) orelse {

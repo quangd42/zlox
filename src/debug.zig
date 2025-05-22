@@ -27,6 +27,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     const oc: OpCode = @enumFromInt(chunk.getByteAt(offset));
     return switch (oc) {
         .CONSTANT, .DEFINE_GLOBAL, .GET_GLOBAL, .SET_GLOBAL => constantInstruction(oc, chunk, offset),
+        .SET_LOCAL, .GET_LOCAL => byteInstruction(oc, chunk, offset),
         else => simpleInstruction(oc, offset),
     };
 }
@@ -34,6 +35,12 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
 fn constantInstruction(oc: OpCode, chunk: *Chunk, offset: usize) usize {
     const const_idx = chunk.code.items[offset + 1];
     print("{s:-<16} {d:4} '{}'\n", .{ @tagName(oc), const_idx, chunk.constants.items[const_idx] });
+    return offset + 2;
+}
+
+fn byteInstruction(oc: OpCode, chunk: *Chunk, offset: usize) usize {
+    const const_idx = chunk.code.items[offset + 1];
+    print("{s:-<16} {d:4}\n", .{ @tagName(oc), const_idx });
     return offset + 2;
 }
 

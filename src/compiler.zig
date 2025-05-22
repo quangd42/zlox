@@ -22,18 +22,26 @@ const VM = @import("vm.zig").VM;
 pub const Compiler = struct {
     scanner: Scanner,
     parser: Parser,
+    locals: std.ArrayList(Local),
+    scope_depth: u8,
     chunk: *Chunk,
     vm: *VM,
 
-    pub fn init(vm: *VM, source: []const u8, chunk: *Chunk) Compiler {
+    pub fn init(vm: *VM, source: []const u8, chunk: *Chunk) !Compiler {
         var compiler = Compiler{
             .scanner = Scanner.init(source),
             .parser = Parser{},
+            .locals = try std.ArrayList(Local).initCapacity(vm.allocator, std.math.maxInt(u8)),
+            .scope_depth = 0,
             .chunk = chunk,
             .vm = vm,
         };
         compiler.advance();
         return compiler;
+    }
+
+    pub fn deinit(self: *Compiler) void {
+        self.locals.deinit();
     }
 
     pub fn compile(self: *Compiler) !void {
@@ -70,7 +78,7 @@ pub const Compiler = struct {
     }
 
     fn consume(self: *Compiler, expected: TokenType, message: []const u8) void {
-        if (self.parser.current.type != expected) {
+        if (!self.check(expected)) {
             self.errorAtCurrent(message);
             return;
         }
@@ -78,9 +86,13 @@ pub const Compiler = struct {
     }
 
     fn match(self: *Compiler, expected: TokenType) bool {
-        if (self.parser.current.type != expected) return false;
+        if (!self.check(expected)) return false;
         self.advance();
         return true;
+    }
+
+    fn check(self: *Compiler, expected: TokenType) bool {
+        return self.parser.current.type == expected;
     }
 
     fn errorAtPrev(self: *Compiler, message: []const u8) void {
@@ -151,44 +163,110 @@ pub const Compiler = struct {
 
     fn varDeclaration(self: *Compiler) !void {
         self.advance(); // VAR keyword
-        self.consume(.IDENTIFIER, "Expect variable name.");
-        const ident_idx = try makeIdentConstant(self, self.parser.previous.lexeme);
+        const global_idx = try parseVariable(self);
         if (self.match(.EQUAL)) {
             try self.expression();
         } else {
             self.emitOpCode(.NIL);
         }
         self.consume(.SEMICOLON, "Expect ';' after variable declaration.");
-        defineVariable(self, ident_idx);
+        defineVariable(self, global_idx);
+    }
+
+    fn parseVariable(c: *Compiler) !u8 {
+        c.consume(.IDENTIFIER, "Expect variable name.");
+        c.declareVariable();
+        if (c.scope_depth > 0) return 0;
+        return makeIdentConstant(c, c.parser.previous.lexeme);
+    }
+
+    fn declareVariable(c: *Compiler) void {
+        if (c.scope_depth == 0) return; // If global scope just skip
+        var i = c.locals.items.len;
+        while (i > 0) : (i -= 1) {
+            const local = c.locals.items[i - 1];
+            if (local.depth == null or local.depth.? < c.scope_depth) break;
+            if (std.mem.eql(u8, c.parser.previous.lexeme, local.lexeme)) {
+                c.errorAtPrev("Variable with the this name exists in this scope.");
+            }
+        }
+        c.addLocal(c.parser.previous.lexeme);
+    }
+
+    fn addLocal(c: *Compiler, lexeme: []const u8) void {
+        // depth = null to mark local as uninitialized
+        c.locals.appendAssumeCapacity(.{ .lexeme = lexeme, .depth = null });
+    }
+
+    fn resolveLocal(c: *Compiler, lexeme: []const u8) ?u8 {
+        var i = c.locals.items.len;
+        while (i > 0) : (i -= 1) {
+            const local = c.locals.items[i - 1];
+            if (std.mem.eql(u8, local.lexeme, lexeme)) {
+                if (local.depth == null) {
+                    c.errorAtPrev("Can't read local variable in its own initializer.");
+                }
+                return @intCast(i - 1);
+            }
+        }
+        return null;
     }
 
     fn statement(self: *Compiler) !void {
         const tok = self.parser.current;
         switch (tok.type) {
             .PRINT => try self.printStatement(),
+            .LEFT_BRACE => {
+                self.beginScope();
+                defer self.endScope();
+                try self.block();
+            },
             else => try self.expressionStatement(),
         }
     }
 
-    fn printStatement(c: *Compiler) !void {
-        c.advance();
-        try c.expression();
-        c.consume(.SEMICOLON, "Expect ';' after value.");
-        c.emitOpCode(.PRINT);
+    fn printStatement(self: *Compiler) !void {
+        self.advance();
+        try self.expression();
+        self.consume(.SEMICOLON, "Expect ';' after value.");
+        self.emitOpCode(.PRINT);
     }
 
-    fn expressionStatement(c: *Compiler) !void {
-        try c.expression();
-        c.consume(.SEMICOLON, "Expect ';' after value.");
-        c.emitOpCode(.POP);
+    fn expressionStatement(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.SEMICOLON, "Expect ';' after value.");
+        self.emitOpCode(.POP);
+    }
+
+    fn block(self: *Compiler) Allocator.Error!void {
+        self.advance(); // .LEFT_BRACE
+        while (!self.check(.RIGHT_BRACE) and !self.check(.EOF)) {
+            try self.declaration();
+        }
+        self.consume(.RIGHT_BRACE, "Expect '}' after block.");
+    }
+
+    fn beginScope(c: *Compiler) void {
+        c.scope_depth += 1;
+    }
+
+    fn endScope(c: *Compiler) void {
+        c.scope_depth -= 1;
+        while (c.locals.items.len > 0 and c.locals.getLast().depth.? > c.scope_depth) {
+            c.emitOpCode(.POP);
+            _ = c.locals.pop();
+        }
     }
 };
 
 test "compiler init & parse simple expression" {
     const source = "1 + 275";
     var vm = @import("vm.zig").VM.init(testing.allocator);
-    var chunk = Chunk.init(testing.allocator);
-    var compiler = Compiler.init(&vm, source, &chunk);
+    defer vm.deinit();
+    var chunk = try Chunk.init(testing.allocator);
+    defer chunk.deinit();
+    var compiler = try Compiler.init(&vm, source, &chunk);
+    defer compiler.deinit();
     try testing.expect(std.mem.eql(u8, compiler.parser.current.lexeme, "1"));
     compiler.advance();
     try testing.expect(std.mem.eql(u8, compiler.parser.previous.lexeme, "1"));
@@ -200,6 +278,11 @@ test "compiler init & parse simple expression" {
     compiler.errorAtCurrent("=> expect: THIS SHOULD NOT SHOW UP.");
     try testing.expect(compiler.parser.had_error);
 }
+
+const Local = struct {
+    lexeme: []const u8,
+    depth: ?u8,
+};
 
 const Parser = struct {
     previous: Token = undefined,
@@ -367,14 +450,24 @@ fn variable(c: *Compiler, can_assign: bool) Allocator.Error!void {
 }
 
 fn namedVariable(c: *Compiler, lexeme: []const u8, can_assign: bool) !void {
-    const idx = try makeIdentConstant(c, lexeme);
+    var getOp: OpCode = .GET_LOCAL;
+    var setOp: OpCode = .SET_LOCAL;
+    var const_idx: u8 = 0;
+    const local_idx = c.resolveLocal(lexeme);
+    if (local_idx) |idx| {
+        const_idx = idx;
+    } else {
+        getOp = .GET_GLOBAL;
+        setOp = .SET_GLOBAL;
+        const_idx = try makeIdentConstant(c, lexeme);
+    }
     if (can_assign and c.match(.EQUAL)) {
         try c.expression();
-        c.emitOpCode(.SET_GLOBAL);
+        c.emitOpCode(setOp);
     } else {
-        c.emitOpCode(.GET_GLOBAL);
+        c.emitOpCode(getOp);
     }
-    c.emitByte(idx);
+    c.emitByte(const_idx);
 }
 
 fn makeIdentConstant(c: *Compiler, lexeme: []const u8) !u8 {
@@ -383,6 +476,12 @@ fn makeIdentConstant(c: *Compiler, lexeme: []const u8) !u8 {
 }
 
 fn defineVariable(c: *Compiler, constant_idx: u8) void {
+    if (c.scope_depth > 0) {
+        // mark variable as initialized
+        c.locals.items[c.locals.items.len - 1].depth = c.scope_depth;
+        return;
+    }
+
     c.emitOpCode(.DEFINE_GLOBAL);
     c.emitByte(constant_idx);
 }
