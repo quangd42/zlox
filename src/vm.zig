@@ -187,12 +187,12 @@ pub const VM = struct {
 
     fn readByte(self: *VM) u8 {
         defer self.ip += 1;
-        return self.chunk.getByteAt(self.ip);
+        return self.chunk.getByteAt(self.ip) catch unreachable;
     }
 
     fn readConstant(self: *VM) Value {
         const constant_idx = self.readByte();
-        return self.chunk.getConstantAt(constant_idx);
+        return self.chunk.getConstantAt(constant_idx) catch unreachable;
     }
 
     // fn readConstantLong(self: *VM) Value {
@@ -206,7 +206,8 @@ pub const VM = struct {
 
     fn readString(self: *VM) *ObjString {
         const const_idx = self.readByte();
-        return self.chunk.getConstantAt(const_idx).asObj(.String).?;
+        const constant = self.chunk.getConstantAt(const_idx) catch unreachable;
+        return constant.asObj(.String).?;
     }
 
     fn peek(self: *VM, distance: usize) ?Value {

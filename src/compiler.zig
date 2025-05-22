@@ -47,24 +47,24 @@ pub const Compiler = struct {
     pub fn compile(self: *Compiler) !void {
         while (!self.match(.EOF)) try self.declaration();
         self.consume(.EOF, "Expect end of statement.");
-        self.emitOpCode(.RETURN);
+        try self.emitOpCode(.RETURN);
         if (dbg and self.parser.had_error) {
             debug.disassembleChunk(self.chunk, "code");
         }
         if (self.parser.had_error) return error.ParsingError;
     }
 
-    fn emitByte(self: *Compiler, byte: u8) void {
-        self.chunk.writeByte(byte, self.parser.previous.line);
+    fn emitByte(self: *Compiler, byte: u8) !void {
+        try self.chunk.writeByte(byte, self.parser.previous.line);
     }
 
-    fn emitOpCode(self: *Compiler, oc: OpCode) void {
-        self.emitByte(@intFromEnum(oc));
+    fn emitOpCode(self: *Compiler, oc: OpCode) !void {
+        try self.emitByte(@intFromEnum(oc));
     }
 
-    fn emitConstant(self: *Compiler, value: Value) void {
+    fn emitConstant(self: *Compiler, value: Value) !void {
         const const_idx = self.chunk.addConstant(value);
-        self.chunk.writeConstant(const_idx, self.parser.previous.line);
+        try self.chunk.writeConstant(const_idx, self.parser.previous.line);
     }
 
     fn advance(self: *Compiler) void {
@@ -167,10 +167,10 @@ pub const Compiler = struct {
         if (self.match(.EQUAL)) {
             try self.expression();
         } else {
-            self.emitOpCode(.NIL);
+            try self.emitOpCode(.NIL);
         }
         self.consume(.SEMICOLON, "Expect ';' after variable declaration.");
-        defineVariable(self, global_idx);
+        try defineVariable(self, global_idx);
     }
 
     fn parseVariable(c: *Compiler) !u8 {
@@ -218,8 +218,8 @@ pub const Compiler = struct {
             .PRINT => try self.printStatement(),
             .LEFT_BRACE => {
                 self.beginScope();
-                defer self.endScope();
                 try self.block();
+                try self.endScope();
             },
             else => try self.expressionStatement(),
         }
@@ -229,13 +229,13 @@ pub const Compiler = struct {
         self.advance();
         try self.expression();
         self.consume(.SEMICOLON, "Expect ';' after value.");
-        self.emitOpCode(.PRINT);
+        try self.emitOpCode(.PRINT);
     }
 
     fn expressionStatement(self: *Compiler) !void {
         try self.expression();
         self.consume(.SEMICOLON, "Expect ';' after value.");
-        self.emitOpCode(.POP);
+        try self.emitOpCode(.POP);
     }
 
     fn block(self: *Compiler) Allocator.Error!void {
@@ -250,10 +250,10 @@ pub const Compiler = struct {
         c.scope_depth += 1;
     }
 
-    fn endScope(c: *Compiler) void {
+    fn endScope(c: *Compiler) !void {
         c.scope_depth -= 1;
         while (c.locals.items.len > 0 and c.locals.getLast().depth.? > c.scope_depth) {
-            c.emitOpCode(.POP);
+            try c.emitOpCode(.POP);
             _ = c.locals.pop();
         }
     }
@@ -379,7 +379,7 @@ fn number(c: *Compiler, can_assign: bool) Allocator.Error!void {
         print("{any}: ", .{err});
         @panic("failed to parse number literal.");
     };
-    c.emitConstant(.{ .Number = val });
+    try c.emitConstant(.{ .Number = val });
 }
 
 fn grouping(c: *Compiler, can_assign: bool) Allocator.Error!void {
@@ -393,11 +393,11 @@ fn unary(c: *Compiler, can_assign: bool) Allocator.Error!void {
     const operator_type = c.parser.previous.type;
     try c.parsePrecedence(.UNARY);
 
-    switch (operator_type) {
+    try switch (operator_type) {
         .MINUS => c.emitOpCode(.NEGATE),
         .BANG => c.emitOpCode(.NOT),
         else => unreachable,
-    }
+    };
 }
 
 fn binary(c: *Compiler, can_assign: bool) Allocator.Error!void {
@@ -406,15 +406,15 @@ fn binary(c: *Compiler, can_assign: bool) Allocator.Error!void {
     const target_prec_int = @intFromEnum(Rules.get(operator_type).precedence) + 1;
     try c.parsePrecedence(@enumFromInt(target_prec_int));
 
-    switch (operator_type) {
+    try switch (operator_type) {
         .PLUS => c.emitOpCode(.ADD),
         .MINUS => c.emitOpCode(.SUBTRACT),
         .STAR => c.emitOpCode(.MULTIPLY),
         .SLASH => c.emitOpCode(.DIVIDE),
         .EQUAL_EQUAL => c.emitOpCode(.EQUAL),
         .BANG_EQUAL => {
-            c.emitOpCode(.EQUAL);
-            c.emitOpCode(.NOT);
+            try c.emitOpCode(.EQUAL);
+            try c.emitOpCode(.NOT);
         },
         .GREATER => c.emitOpCode(.GREATER),
         .GREATER_EQUAL => c.emitOpCode(.GREATER_EQUAL),
@@ -424,24 +424,24 @@ fn binary(c: *Compiler, can_assign: bool) Allocator.Error!void {
             if (dbg) print("{}\n", .{tt});
             unreachable;
         },
-    }
+    };
 }
 
 fn literal(c: *Compiler, can_assign: bool) Allocator.Error!void {
     _ = can_assign;
-    switch (c.parser.previous.type) {
+    try switch (c.parser.previous.type) {
         .FALSE => c.emitOpCode(.FALSE),
         .NIL => c.emitOpCode(.NIL),
         .TRUE => c.emitOpCode(.TRUE),
         else => unreachable,
-    }
+    };
 }
 
 fn string(c: *Compiler, can_assign: bool) Allocator.Error!void {
     _ = can_assign;
     const prev = &c.parser.previous;
     const str_obj = try ObjString.init(c.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
-    c.emitConstant(.{ .Obj = &str_obj.obj });
+    try c.emitConstant(.{ .Obj = &str_obj.obj });
 }
 
 // prefix parseFn for variable
@@ -463,11 +463,11 @@ fn namedVariable(c: *Compiler, lexeme: []const u8, can_assign: bool) !void {
     }
     if (can_assign and c.match(.EQUAL)) {
         try c.expression();
-        c.emitOpCode(setOp);
+        try c.emitOpCode(setOp);
     } else {
-        c.emitOpCode(getOp);
+        try c.emitOpCode(getOp);
     }
-    c.emitByte(const_idx);
+    try c.emitByte(const_idx);
 }
 
 fn makeIdentConstant(c: *Compiler, lexeme: []const u8) !u8 {
@@ -475,13 +475,13 @@ fn makeIdentConstant(c: *Compiler, lexeme: []const u8) !u8 {
     return c.chunk.addConstant(.{ .Obj = &str_obj.obj });
 }
 
-fn defineVariable(c: *Compiler, constant_idx: u8) void {
+fn defineVariable(c: *Compiler, constant_idx: u8) !void {
     if (c.scope_depth > 0) {
         // mark variable as initialized
         c.locals.items[c.locals.items.len - 1].depth = c.scope_depth;
         return;
     }
 
-    c.emitOpCode(.DEFINE_GLOBAL);
-    c.emitByte(constant_idx);
+    try c.emitOpCode(.DEFINE_GLOBAL);
+    try c.emitByte(constant_idx);
 }
