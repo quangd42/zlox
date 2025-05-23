@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
-const dbg = @import("config").@"debug-trace";
+const dbg = @import("builtin").mode == .Debug;
 
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
@@ -171,10 +171,10 @@ pub const VM = struct {
                 .PRINT => std.io.getStdOut().writer().print("{?}\n", .{self.pop()}) catch {
                     return InterpretError.RuntimeError;
                 },
-                .JUMP => {
+                .JUMP => self.ip += self.readShort(),
+                .JUMP_IF_TRUE => {
                     const offset = self.readShort();
-                    std.debug.print("{d}\n", .{offset});
-                    self.ip += offset;
+                    if (!self.peek(0).?.isFalsey()) self.ip += offset;
                 },
                 .JUMP_IF_FALSE => {
                     const offset = self.readShort();

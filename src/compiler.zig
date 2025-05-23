@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const print = std.debug.print;
 const testing = std.testing;
 
-const dbg = if (@import("builtin").is_test) true else @import("config").@"debug-trace";
+const dbg = @import("builtin").mode == .Debug;
 
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
@@ -395,7 +395,7 @@ const Rules = ParseRuleArray.init(.{
     .STRING = .{ .prefix = string },
     .NUMBER = .{ .prefix = number },
     // Keywords.
-    .AND = .{},
+    .AND = .{ .infix = and_, .precedence = .AND },
     .CLASS = .{},
     .ELSE = .{},
     .FALSE = .{ .prefix = literal },
@@ -403,7 +403,7 @@ const Rules = ParseRuleArray.init(.{
     .FUN = .{},
     .IF = .{},
     .NIL = .{ .prefix = literal },
-    .OR = .{},
+    .OR = .{ .infix = or_, .precedence = .OR },
     .PRINT = .{},
     .RETURN = .{},
     .SUPER = .{},
@@ -520,4 +520,19 @@ fn namedVariable(c: *Compiler, lexeme: []const u8, can_assign: bool) !void {
 // prefix parseFn for variable
 fn variable(c: *Compiler, can_assign: bool) Allocator.Error!void {
     try namedVariable(c, c.parser.previous.lexeme, can_assign);
+}
+
+fn and_(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
+    const skip_rhs_loc = try c.emitJump(.JUMP_IF_FALSE);
+    try c.emitOpCode(.POP);
+    try c.parsePrecedence(.AND);
+    c.patchJump(skip_rhs_loc);
+}
+fn or_(c: *Compiler, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
+    const skip_rhs_loc = try c.emitJump(.JUMP_IF_TRUE);
+    try c.emitOpCode(.POP);
+    try c.parsePrecedence(.OR);
+    c.patchJump(skip_rhs_loc);
 }
