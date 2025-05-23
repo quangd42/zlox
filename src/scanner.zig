@@ -81,10 +81,10 @@ pub const Scanner = struct {
                 },
                 '/' => {
                     if (s.peekNext() == '/') {
-                        while (!s.isAtEnd() and char != '\n') s.current += 1;
-                    } else {
-                        return;
-                    }
+                        while (!s.isAtEnd()) : (s.current += 1) {
+                            if (s.source[s.current] == '\n') break;
+                        }
+                    } else return;
                 },
                 else => return,
             }
