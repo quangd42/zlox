@@ -180,6 +180,7 @@ pub const VM = struct {
                     const offset = self.readShort();
                     if (self.peek(0).?.isFalsey()) self.ip += offset;
                 },
+                .LOOP => self.ip -= self.readShort(),
                 .RETURN => {
                     // std.debug.print("{}\n", .{self.pop().?});
                     return;
@@ -195,8 +196,8 @@ pub const VM = struct {
     }
 
     fn readByte(self: *VM) u8 {
-        defer self.ip += 1;
-        return self.chunk.getByteAt(self.ip) catch unreachable;
+        self.ip += 1;
+        return self.chunk.getByteAt(self.ip - 1) catch unreachable;
     }
 
     fn readConstant(self: *VM) Value {
@@ -205,15 +206,13 @@ pub const VM = struct {
     }
 
     fn readShort(self: *VM) u16 {
-        defer self.ip += 2;
-        const byte1 = self.chunk.getByteAt(self.ip) catch unreachable;
-        const byte2 = self.chunk.getByteAt(self.ip + 1) catch unreachable;
+        const byte1 = self.readByte();
+        const byte2 = self.readByte();
         return @as(u16, byte1) << 8 | byte2;
     }
 
     fn readString(self: *VM) *ObjString {
-        const const_idx = self.readByte();
-        const constant = self.chunk.getConstantAt(const_idx) catch unreachable;
+        const constant = self.readConstant();
         return constant.asObj(.String).?;
     }
 

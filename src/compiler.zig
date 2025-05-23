@@ -81,6 +81,16 @@ pub const Compiler = struct {
         return c.chunk.code.items.len - 2;
     }
 
+    fn emitLoop(c: *Compiler, loop_start: usize) !void {
+        try c.emitOpCode(.LOOP);
+        const distance = c.chunk.code.items.len - loop_start;
+        if (distance > std.math.maxInt(u16)) {
+            c.errorAtPrev("Loop body too large.");
+        }
+        try c.emitByte(@intCast(distance >> 8 & 0xff));
+        try c.emitByte(@intCast(distance & 0xff));
+    }
+
     fn emitConstant(c: *Compiler, value: Value) !void {
         const const_idx = c.chunk.addConstant(value);
         try c.chunk.writeConstant(const_idx, c.parser.previous.line);
@@ -244,6 +254,7 @@ pub const Compiler = struct {
         switch (tok.type) {
             .VAR => try self.varDeclaration(),
             .IF => try self.ifStatement(),
+            .WHILE => try self.whileStatement(),
             else => try self.statement(),
         }
         if (self.parser.panic_mode) self.synchronize();
@@ -282,20 +293,6 @@ pub const Compiler = struct {
         try self.emitOpCode(.PRINT);
     }
 
-    fn expressionStatement(self: *Compiler) !void {
-        try self.expression();
-        self.consume(.SEMICOLON, "Expect ';' after value.");
-        try self.emitOpCode(.POP);
-    }
-
-    fn block(self: *Compiler) Allocator.Error!void {
-        self.advance(); // .LEFT_BRACE
-        while (!self.check(.RIGHT_BRACE) and !self.check(.EOF)) {
-            try self.declaration();
-        }
-        self.consume(.RIGHT_BRACE, "Expect '}' after block.");
-    }
-
     fn ifStatement(self: *Compiler) !void {
         self.advance(); // .IF
         self.consume(.LEFT_PAREN, "Expect '(' after 'if'.");
@@ -309,6 +306,36 @@ pub const Compiler = struct {
         try self.emitOpCode(.POP);
         if (self.match(.ELSE)) try self.statement();
         self.patchJump(skip_else_loc);
+    }
+
+    fn whileStatement(self: *Compiler) !void {
+        self.advance(); // WHILE
+        const loop_start_loc = self.chunk.code.items.len;
+        self.consume(.LEFT_PAREN, "Expect '(' after 'while'.");
+        try self.expression();
+        self.consume(.RIGHT_PAREN, "Expect ')' after condition.");
+
+        const skip_body_loc = try self.emitJump(.JUMP_IF_FALSE);
+        try self.emitOpCode(.POP);
+        try self.statement();
+        try self.emitLoop(loop_start_loc);
+
+        self.patchJump(skip_body_loc);
+        try self.emitOpCode(.POP);
+    }
+
+    fn expressionStatement(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.SEMICOLON, "Expect ';' after value.");
+        try self.emitOpCode(.POP);
+    }
+
+    fn block(self: *Compiler) Allocator.Error!void {
+        self.advance(); // .LEFT_BRACE
+        while (!self.check(.RIGHT_BRACE) and !self.check(.EOF)) {
+            try self.declaration();
+        }
+        self.consume(.RIGHT_BRACE, "Expect '}' after block.");
     }
 };
 
