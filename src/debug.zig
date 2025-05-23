@@ -28,8 +28,8 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     return switch (oc) {
         .CONSTANT, .DEFINE_GLOBAL, .GET_GLOBAL, .SET_GLOBAL => constantInstruction(oc, chunk, offset),
         .SET_LOCAL, .GET_LOCAL => byteInstruction(oc, chunk, offset),
-        .JUMP, .JUMP_IF_TRUE, .JUMP_IF_FALSE => jumpInstruction(oc, .Forward, chunk, offset),
-        .LOOP => jumpInstruction(oc, .Back, chunk, offset),
+        .JUMP, .JUMP_IF_TRUE, .JUMP_IF_FALSE => jumpInstruction(oc, 1, chunk, offset),
+        .LOOP => jumpInstruction(oc, -1, chunk, offset),
         else => simpleInstruction(oc, offset),
     };
 }
@@ -46,10 +46,10 @@ fn byteInstruction(oc: OpCode, chunk: *Chunk, offset: usize) usize {
     return offset + 2;
 }
 
-fn jumpInstruction(oc: OpCode, dir: enum { Back, Forward }, chunk: *Chunk, offset: usize) usize {
-    const jump = @as(u16, chunk.code.items[offset + 1]) << 8 | @as(u16, @intCast(chunk.code.items[offset + 2]));
-    const distance = if (dir == .Back) offset + 1 - jump else offset + 3 + jump;
-    print("{s:-<16} {d:4} -> {d}\n", .{ @tagName(oc), offset, distance });
+fn jumpInstruction(oc: OpCode, sign: i32, chunk: *Chunk, offset: usize) usize {
+    const jump = @as(u16, chunk.code.items[offset + 1]) << 8 | @as(u16, chunk.code.items[offset + 2]);
+    const location = @as(i32, @intCast(offset)) + 3 + @as(i32, jump) * sign;
+    print("{s:-<16} {d:4} -> {d}\n", .{ @tagName(oc), offset, location });
     return offset + 3;
 }
 

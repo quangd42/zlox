@@ -83,7 +83,7 @@ pub const Compiler = struct {
 
     fn emitLoop(c: *Compiler, loop_start: usize) !void {
         try c.emitOpCode(.LOOP);
-        const distance = c.chunk.code.items.len - loop_start;
+        const distance = c.chunk.code.items.len - loop_start + 2;
         if (distance > std.math.maxInt(u16)) {
             c.errorAtPrev("Loop body too large.");
         }
@@ -105,8 +105,8 @@ pub const Compiler = struct {
             c.errorAtPrev("Too much code to jump over.");
         }
 
-        c.chunk.code.items[offset] = @as(u8, @intCast((distance >> 8) & 0xff));
-        c.chunk.code.items[offset + 1] = @as(u8, @intCast(distance & 0xff));
+        c.chunk.code.items[offset] = @as(u8, @intCast(distance >> 8)) & 0xff;
+        c.chunk.code.items[offset + 1] = @as(u8, @intCast(distance)) & 0xff;
     }
 
     fn advance(c: *Compiler) void {
@@ -255,6 +255,7 @@ pub const Compiler = struct {
             .VAR => try self.varDeclaration(),
             .IF => try self.ifStatement(),
             .WHILE => try self.whileStatement(),
+            .FOR => try self.forStatement(),
             else => try self.statement(),
         }
         if (self.parser.panic_mode) self.synchronize();
@@ -294,7 +295,7 @@ pub const Compiler = struct {
     }
 
     fn ifStatement(self: *Compiler) !void {
-        self.advance(); // .IF
+        self.advance(); // IF
         self.consume(.LEFT_PAREN, "Expect '(' after 'if'.");
         try self.expression();
         self.consume(.RIGHT_PAREN, "Expect ')' after condition.");
@@ -324,6 +325,47 @@ pub const Compiler = struct {
         try self.emitOpCode(.POP);
     }
 
+    fn forStatement(self: *Compiler) !void {
+        self.advance(); // FOR
+        self.beginScope();
+        self.consume(.LEFT_PAREN, "Expect '(' after 'for'.");
+        if (!self.match(.SEMICOLON)) {
+            switch (self.parser.current.type) {
+                .VAR => try self.varDeclaration(),
+                else => try self.expressionStatement(),
+            }
+        }
+        var loop_start = self.chunk.code.items.len;
+        var skip_body_loc: ?usize = null;
+        if (!self.match(.SEMICOLON)) {
+            try self.expression();
+            self.consume(.SEMICOLON, "Expect ';' after loop condition.");
+            skip_body_loc = try self.emitJump(.JUMP_IF_FALSE);
+            try self.emitOpCode(.POP);
+        }
+        if (!self.match(.RIGHT_PAREN)) {
+            const skip_increment_loc = try self.emitJump(.JUMP);
+            const increment_start_loc = self.chunk.code.items.len;
+            try self.expression();
+            try self.emitOpCode(.POP);
+            self.consume(.RIGHT_PAREN, "Expect ')' after for clauses.");
+
+            try self.emitLoop(loop_start);
+            loop_start = increment_start_loc;
+            self.patchJump(skip_increment_loc);
+        }
+
+        try self.statement();
+        try self.emitLoop(loop_start);
+
+        if (skip_body_loc) |loc| {
+            self.patchJump(loc);
+            try self.emitOpCode(.POP);
+        }
+
+        try self.endScope();
+    }
+
     fn expressionStatement(self: *Compiler) !void {
         try self.expression();
         self.consume(.SEMICOLON, "Expect ';' after value.");
@@ -331,7 +373,7 @@ pub const Compiler = struct {
     }
 
     fn block(self: *Compiler) Allocator.Error!void {
-        self.advance(); // .LEFT_BRACE
+        self.advance(); // LEFT_BRACE
         while (!self.check(.RIGHT_BRACE) and !self.check(.EOF)) {
             try self.declaration();
         }

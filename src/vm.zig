@@ -171,7 +171,10 @@ pub const VM = struct {
                 .PRINT => std.io.getStdOut().writer().print("{?}\n", .{self.pop()}) catch {
                     return InterpretError.RuntimeError;
                 },
-                .JUMP => self.ip += self.readShort(),
+                .JUMP => {
+                    const offset = self.readShort();
+                    self.ip += offset;
+                },
                 .JUMP_IF_TRUE => {
                     const offset = self.readShort();
                     if (!self.peek(0).?.isFalsey()) self.ip += offset;
@@ -180,7 +183,10 @@ pub const VM = struct {
                     const offset = self.readShort();
                     if (self.peek(0).?.isFalsey()) self.ip += offset;
                 },
-                .LOOP => self.ip -= self.readShort(),
+                .LOOP => {
+                    const offset = self.readShort();
+                    self.ip -= offset;
+                },
                 .RETURN => {
                     // std.debug.print("{}\n", .{self.pop().?});
                     return;
