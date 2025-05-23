@@ -243,6 +243,7 @@ pub const Compiler = struct {
         const tok = self.parser.current;
         switch (tok.type) {
             .VAR => try self.varDeclaration(),
+            .IF => try self.ifStatement(),
             else => try self.statement(),
         }
         if (self.parser.panic_mode) self.synchronize();
@@ -275,7 +276,7 @@ pub const Compiler = struct {
     }
 
     fn printStatement(self: *Compiler) !void {
-        self.advance();
+        self.advance(); // PRINT
         try self.expression();
         self.consume(.SEMICOLON, "Expect ';' after value.");
         try self.emitOpCode(.PRINT);

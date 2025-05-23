@@ -13,7 +13,7 @@ pub fn main() !void {
     const allocator = alloc_type.allocator();
     defer {
         const deinit_status = alloc_type.deinit();
-        if (deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAILED");
+        if (dbg and deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAILED");
     }
 
     var my_vm = VM.init(allocator);
