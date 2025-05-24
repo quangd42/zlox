@@ -30,7 +30,7 @@ pub const Value = union(Type) {
             .Number => |val| try writer.print("{d}", .{val}),
             .Obj => |obj| {
                 switch (obj.type) {
-                    .String => try writer.print("{?}", .{self.asObj(obj.type)}),
+                    inline else => |obj_t| try writer.print("{?}", .{self.asObj(obj_t)}),
                 }
             },
         }
@@ -49,7 +49,7 @@ pub const Value = union(Type) {
         };
     }
 
-    pub inline fn as(self: Value, val_t: Type) ?@FieldType(Value, @tagName(val_t)) {
+    pub inline fn as(self: Value, comptime val_t: Type) ?@FieldType(Value, @tagName(val_t)) {
         return switch (self) {
             .Obj => null,
             inline else => |_, tag| if (tag == val_t) @field(self, @tagName((val_t))) else null,
@@ -58,7 +58,7 @@ pub const Value = union(Type) {
 
     pub inline fn asObj(self: Value, obj_t: ObjType) ?*obj_t.VariantType() {
         return switch (self) {
-            .Obj => |obj| @alignCast(@fieldParentPtr("obj", obj)),
+            .Obj => |obj| if (obj.type == obj_t) @alignCast(@fieldParentPtr("obj", obj)) else null,
             else => null,
         };
     }
@@ -68,10 +68,10 @@ pub const Value = union(Type) {
             .Obj => |obj| {
                 if (!other.isObj(obj.type)) return false;
                 switch (obj.type) {
-                    .String => |t| {
-                        const str_a = self.asObj(t).?;
-                        const str_b = self.asObj(t).?;
-                        return str_a.eql(str_b);
+                    inline else => |t| {
+                        const obj_a = self.asObj(t).?;
+                        const obj_b = self.asObj(t).?;
+                        return obj_a.eql(obj_b);
                     },
                 }
             },

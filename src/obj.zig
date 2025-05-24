@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
+const Chunk = @import("chunk.zig").Chunk;
 const VM = @import("vm.zig").VM;
 
 pub const Obj = struct {
@@ -10,8 +11,8 @@ pub const Obj = struct {
 
     pub fn deinit(self: *Obj, vm: *VM) void {
         switch (self.type) {
-            inline else => {
-                const ObjVariant = self.type.VariantType();
+            inline else => |t| {
+                const ObjVariant = t.VariantType();
                 const obj: *ObjVariant = @alignCast(@fieldParentPtr("obj", self));
                 obj.deinit(vm);
             },
@@ -21,11 +22,63 @@ pub const Obj = struct {
 
 pub const Type = enum {
     String,
+    Function,
 
     pub fn VariantType(comptime self: @This()) type {
         return switch (self) {
             .String => String,
+            .Function => Function,
         };
+    }
+};
+
+pub const FunctionType = enum {
+    Function,
+    Script,
+};
+
+pub const Function = struct {
+    obj: Obj,
+    arity: u8,
+    chunk: Chunk,
+    name: ?*String,
+
+    const Self = @This();
+    pub fn init(vm: *VM) !*Self {
+        return allocate(vm);
+    }
+
+    pub fn deinit(self: *Self, vm: *VM) void {
+        vm.allocator.destroy(self);
+    }
+
+    fn allocate(vm: *VM) !*Self {
+        const out = try vm.allocator.create(Self);
+        out.* = .{
+            .obj = .{ .type = .Function },
+            .arity = 0,
+            .chunk = try Chunk.init(vm.allocator),
+            .name = null,
+        };
+        vm.objects = &out.obj;
+        return out;
+    }
+
+    pub fn eql(self: *Self, other: *Self) bool {
+        return self == other;
+    }
+
+    pub fn format(
+        self: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        if (self.name) |obj| {
+            try writer.print("<fn {s}>", .{obj.chars});
+        } else {
+            try writer.writeAll("<script>");
+        }
     }
 };
 
@@ -77,7 +130,7 @@ pub const String = struct {
     }
 
     pub fn format(
-        self: @This(),
+        self: String,
         comptime _: []const u8,
         _: std.fmt.FormatOptions,
         writer: anytype,
