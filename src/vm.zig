@@ -10,18 +10,28 @@ const OpCode = _chunk.OpCode;
 const _obj = @import("obj.zig");
 const Obj = _obj.Obj;
 const ObjString = _obj.String;
-const Compiler = @import("compiler.zig").Compiler;
+const ObjFunction = _obj.Function;
+const Compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
 const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
+
+const FRAME_MAX = 64;
+const STACK_MAX = FRAME_MAX * std.math.maxInt(u8);
 
 pub const InterpretError = error{
     CompileError,
     RuntimeError,
 } || Allocator.Error;
 
+const CallFrame = struct {
+    function: *ObjFunction,
+    ip: usize,
+    slots: []Value,
+};
+
 pub const VM = struct {
-    ip: usize = 0,
+    frames: std.ArrayList(CallFrame),
     stack: std.ArrayList(Value),
     chunk: *Chunk = undefined,
     objects: ?*Obj = null,
@@ -31,6 +41,7 @@ pub const VM = struct {
 
     pub fn init(allocator: Allocator) VM {
         return VM{
+            .frames = std.ArrayList(CallFrame).init(allocator),
             .stack = std.ArrayList(Value).init(allocator),
             .strings = Table.init(allocator),
             .globals = Table.init(allocator),
@@ -93,28 +104,29 @@ pub const VM = struct {
     fn interpret(self: *VM, source: []const u8) !void {
         self.resetStack();
 
-        var chunk = try Chunk.init(self.allocator);
-        defer chunk.deinit();
+        var compiler = try Compiler.init(self, source);
+        const function = compiler.compile() catch return InterpretError.CompileError;
 
-        var compiler = try Compiler.init(self, source, &chunk);
-        defer compiler.deinit();
-        compiler.compile() catch return InterpretError.CompileError;
-
-        self.chunk = &chunk;
-        self.ip = 0;
+        try self.push(.{ .Obj = &function.obj });
+        try self.frames.append(.{
+            .function = function,
+            .ip = 0,
+            .slots = self.stack.items,
+        });
 
         return self.run();
     }
 
     fn run(self: *VM) !void {
-        while (self.ip < self.chunk.code.items.len) {
+        const frame = &self.frames.items[self.frames.items.len - 1];
+        while (frame.ip < frame.function.chunk.code.items.len) {
             if (dbg) {
                 std.debug.print("          ", .{});
                 for (self.stack.items) |slot| {
                     std.debug.print("[ {} ]", .{slot});
                 }
                 std.debug.print("\n", .{});
-                _ = debug.disassembleInstruction(self.chunk, self.ip);
+                _ = debug.disassembleInstruction(&frame.function.chunk, frame.ip);
             }
             const instruction: _chunk.OpCode = @enumFromInt(self.readByte());
             switch (instruction) {
@@ -123,8 +135,8 @@ pub const VM = struct {
                 .TRUE => try self.push(.{ .Bool = true }),
                 .FALSE => try self.push(.{ .Bool = false }),
                 .POP => _ = self.pop(),
-                .GET_LOCAL => try self.push(self.stack.items[self.readByte()]),
-                .SET_LOCAL => self.stack.items[self.readByte()] = self.peek(0).?,
+                .GET_LOCAL => try self.push(frame.slots[self.readByte()]),
+                .SET_LOCAL => frame.slots[self.readByte()] = self.peek(0).?,
                 .GET_GLOBAL => {
                     const name = self.readString();
                     const val = self.globals.get(name) orelse {
@@ -173,19 +185,19 @@ pub const VM = struct {
                 },
                 .JUMP => {
                     const offset = self.readShort();
-                    self.ip += offset;
+                    frame.ip += offset;
                 },
                 .JUMP_IF_TRUE => {
                     const offset = self.readShort();
-                    if (!self.peek(0).?.isFalsey()) self.ip += offset;
+                    if (!self.peek(0).?.isFalsey()) frame.ip += offset;
                 },
                 .JUMP_IF_FALSE => {
                     const offset = self.readShort();
-                    if (self.peek(0).?.isFalsey()) self.ip += offset;
+                    if (self.peek(0).?.isFalsey()) frame.ip += offset;
                 },
                 .LOOP => {
                     const offset = self.readShort();
-                    self.ip -= offset;
+                    frame.ip -= offset;
                 },
                 .RETURN => {
                     // std.debug.print("{}\n", .{self.pop().?});
@@ -196,28 +208,31 @@ pub const VM = struct {
     }
 
     fn runtimeError(self: *VM, comptime fmt: []const u8, args: anytype) void {
+        const frame = &self.frames.items[self.frames.items.len - 1];
         std.debug.print(fmt, args);
-        std.debug.print("\n[line {d}] in script\n", .{self.chunk.lines.items[self.ip - 1]});
+        std.debug.print("\n[line {d}] in script\n", .{frame.function.chunk.lines.items[frame.ip - 1]});
         self.resetStack();
     }
 
-    fn readByte(self: *VM) u8 {
-        self.ip += 1;
-        return self.chunk.getByteAt(self.ip - 1) catch unreachable;
+    inline fn readByte(self: *VM) u8 {
+        const frame = &self.frames.items[self.frames.items.len - 1];
+        frame.ip += 1;
+        return frame.function.chunk.getByteAt(frame.ip - 1) catch unreachable;
     }
 
-    fn readConstant(self: *VM) Value {
+    inline fn readConstant(self: *VM) Value {
+        const frame = &self.frames.getLast();
         const constant_idx = self.readByte();
-        return self.chunk.getConstantAt(constant_idx) catch unreachable;
+        return frame.function.chunk.getConstantAt(constant_idx) catch unreachable;
     }
 
-    fn readShort(self: *VM) u16 {
+    inline fn readShort(self: *VM) u16 {
         const byte1 = self.readByte();
         const byte2 = self.readByte();
         return @as(u16, byte1) << 8 | byte2;
     }
 
-    fn readString(self: *VM) *ObjString {
+    inline fn readString(self: *VM) *ObjString {
         const constant = self.readConstant();
         return constant.asObj(.String).?;
     }
@@ -233,6 +248,7 @@ pub const VM = struct {
     }
 
     fn push(self: *VM, val: Value) !void {
+        if (self.stack.items.len == STACK_MAX) return error.OutOfMemory;
         return self.stack.append(val);
     }
 

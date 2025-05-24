@@ -49,13 +49,14 @@ pub const Function = struct {
     }
 
     pub fn deinit(self: *Self, vm: *VM) void {
+        self.chunk.deinit();
         vm.allocator.destroy(self);
     }
 
     fn allocate(vm: *VM) !*Self {
         const out = try vm.allocator.create(Self);
         out.* = .{
-            .obj = .{ .type = .Function },
+            .obj = .{ .type = .Function, .next = vm.objects },
             .arity = 0,
             .chunk = try Chunk.init(vm.allocator),
             .name = null,
