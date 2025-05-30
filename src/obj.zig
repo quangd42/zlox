@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
 const Chunk = @import("chunk.zig").Chunk;
+const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 
 pub const Obj = struct {
@@ -21,13 +22,15 @@ pub const Obj = struct {
 };
 
 pub const Type = enum {
-    String,
     Function,
+    Native,
+    String,
 
     pub fn VariantType(comptime self: @This()) type {
         return switch (self) {
-            .String => String,
             .Function => Function,
+            .Native => Native,
+            .String => String,
         };
     }
 };
@@ -80,6 +83,42 @@ pub const Function = struct {
         } else {
             try writer.writeAll("<script>");
         }
+    }
+};
+
+pub const NativeFn = *const fn (arg_count: usize, args: [*]const Value) Value;
+
+pub const Native = struct {
+    obj: Obj,
+    function: NativeFn,
+
+    const Self = @This();
+
+    pub fn init(vm: *VM, function: NativeFn) !*Self {
+        const out = try vm.allocator.create(Self);
+        out.* = .{
+            .obj = .{ .type = .Native, .next = vm.objects },
+            .function = function,
+        };
+        vm.objects = &out.obj;
+        return out;
+    }
+
+    pub fn deinit(self: *Self, vm: *VM) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub fn eql(self: *Self, other: *Self) bool {
+        return self == other;
+    }
+
+    pub fn format(
+        _: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.writeAll("<native fn>");
     }
 };
 

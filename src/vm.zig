@@ -10,6 +10,8 @@ const _obj = @import("obj.zig");
 const Obj = _obj.Obj;
 const ObjString = _obj.String;
 const ObjFunction = _obj.Function;
+const ObjNative = _obj.Native;
+const NativeFn = _obj.NativeFn;
 const Compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
 const Table = @import("table.zig").Table;
@@ -52,6 +54,8 @@ pub const VM = struct {
     pub fn deinit(vm: *VM) void {
         vm.strings.deinit();
         vm.globals.deinit();
+        vm.stack.deinit();
+        vm.frames.deinit();
         var object = vm.objects;
         while (object) |obj| {
             const next = obj.next;
@@ -103,6 +107,9 @@ pub const VM = struct {
     }
 
     fn interpret(self: *VM, source: []const u8) !void {
+        self.defineNative("clock", clockNative) catch {
+            @panic("failed to define native function.");
+        };
         var compiler = try Compiler.init(self, source);
         const function = compiler.compile() catch return InterpretError.CompileError;
 
@@ -229,6 +236,17 @@ pub const VM = struct {
         return InterpretError.RuntimeError;
     }
 
+    fn defineNative(self: *VM, name: []const u8, function: NativeFn) !void {
+        const str = try ObjString.init(self, name);
+        try self.push(.{ .Obj = &str.obj });
+        const fun = try ObjNative.init(self, function);
+        try self.push(.{ .Obj = &fun.obj });
+        _ = try self.globals.set(self.stack.items[0].asObj(.String).?, self.stack.items[1]);
+
+        _ = self.pop();
+        _ = self.pop();
+    }
+
     inline fn readByte(self: *VM) u8 {
         const frame = &self.frames.items[self.frames.items.len - 1];
         frame.ip += 1;
@@ -319,6 +337,13 @@ pub const VM = struct {
         if (callee.is(.Obj)) {
             switch (callee.Obj.type) {
                 .Function => return self.call(callee.asObj(.Function).?, arg_count),
+                .Native => return {
+                    const native = callee.asObj(.Native).?.function;
+                    const val_start_idx = self.stack.items.len - arg_count;
+                    const result = native(arg_count, self.stack.items.ptr + val_start_idx);
+                    self.stack.shrinkRetainingCapacity(val_start_idx - 1);
+                    try self.push(result);
+                },
                 else => {},
             }
         }
@@ -353,4 +378,10 @@ test "vm deinit" {
     const b_str = try String.init(&vm, "world!");
     const out = try a_str.concat(&vm, b_str);
     try testing.expectEqualSlices(u8, "Hello world!", out.chars);
+}
+
+fn clockNative(arg_count: usize, args: [*]const Value) Value {
+    _ = arg_count;
+    _ = args;
+    return .{ .Number = @floatFromInt(std.time.timestamp()) };
 }

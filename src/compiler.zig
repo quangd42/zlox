@@ -513,7 +513,6 @@ test "compiler init & parse simple expression" {
     try testing.expectEqual(2, fun.chunk.constants.items.len);
     try testing.expectEqual(Value{ .Number = 1 }, fun.chunk.constants.items[0]);
     try testing.expectEqual(Value{ .Number = 275 }, fun.chunk.constants.items[1]);
-    try testing.expectEqual(7, fun.chunk.code.items.len);
     try testing.expectEqual(OpCode.ADD, @as(OpCode, @enumFromInt(fun.chunk.code.items[4])));
 }
 

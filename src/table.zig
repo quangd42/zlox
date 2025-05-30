@@ -151,12 +151,13 @@ test "rewrite key" {
     const key2 = try ObjString.init(&vm, "hello ");
     const key3 = try ObjString.init(&vm, "world");
     const key4 = try key2.concat(&vm, key3);
+    const current_count = vm.globals.count;
     var set = try vm.globals.set(key1, .{ .Number = 1 });
     try testing.expect(set);
-    try testing.expectEqual(1, vm.globals.count);
+    try testing.expectEqual(current_count + 1, vm.globals.count);
     set = try vm.globals.set(key4, .{ .Bool = true });
     try testing.expect(!set);
-    try testing.expectEqual(1, vm.globals.count);
+    try testing.expectEqual(current_count + 1, vm.globals.count);
     var got = vm.globals.get(key1);
     try testing.expect(got != null);
     try testing.expectEqual(Value{ .Bool = true }, got.?);
