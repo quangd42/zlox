@@ -32,6 +32,7 @@ pub const OpCode = enum(u8) {
     JUMP_IF_TRUE,
     JUMP_IF_FALSE,
     LOOP,
+    CALL,
     RETURN,
 };
 
@@ -42,11 +43,10 @@ pub const Chunk = struct {
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) !Chunk {
-        const max = std.math.maxInt(u8);
         return Chunk{
             // Set max cap 256 and use appendAssumeCapacity to make sure
             // no more memory is allocated
-            .constants = try std.ArrayList(Value).initCapacity(allocator, max),
+            .constants = try std.ArrayList(Value).initCapacity(allocator, std.math.maxInt(u8) + 1),
             .code = std.ArrayList(u8).init(allocator),
             .lines = std.ArrayList(usize).init(allocator),
             .allocator = allocator,

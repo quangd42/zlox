@@ -3,8 +3,6 @@ const Allocator = std.mem.Allocator;
 const print = std.debug.print;
 const testing = std.testing;
 
-const dbg = @import("builtin").mode == .Debug;
-
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
 const OpCode = _chunk.OpCode;
@@ -13,13 +11,15 @@ const Obj = _obj.Obj;
 const ObjString = _obj.String;
 const ObjFunction = _obj.Function;
 const FunctionType = _obj.FunctionType;
-const debug = @import("debug.zig");
 const _scanner = @import("scanner.zig");
 const Scanner = _scanner.Scanner;
 const Token = _scanner.Token;
 const TokenType = _scanner.TokenType;
+const debug = @import("debug.zig");
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
+
+const dbg = @import("builtin").mode == .Debug;
 
 scanner: Scanner,
 parser: Parser,
@@ -38,14 +38,19 @@ pub fn init(vm: *VM, source: []const u8) !Self {
     return self;
 }
 
-fn initCompiler(self: *Self, compiler: *Compiler) void {
+fn initCompiler(self: *Self, compiler: *Compiler) !void {
+    if (compiler.type != .Script) {
+        compiler.function.name = try ObjString.init(self.vm, self.parser.previous.lexeme);
+    }
     compiler.locals.appendAssumeCapacity(.{ .depth = 0, .lexeme = "" });
     compiler.enclosing = self.compiler;
     self.compiler = compiler;
 }
 
 fn endCompiler(self: *Self) !*ObjFunction {
+    try self.emitOpCode(.NIL); // Implicit nil return at the end of function
     try self.emitOpCode(.RETURN);
+
     if (dbg and self.parser.had_error) {
         const name = if (self.compiler.?.function.name) |str| str.chars else "<script>";
         debug.disassembleChunk(self.chunk(), name);
@@ -58,7 +63,7 @@ fn endCompiler(self: *Self) !*ObjFunction {
 
 pub fn compile(self: *Self) !*ObjFunction {
     var compiler = try Compiler.init(self.vm, .Script);
-    self.initCompiler(&compiler);
+    try self.initCompiler(&compiler);
     while (!self.match(.EOF)) try self.declaration();
     self.consume(.EOF, "Expect end of statement.");
     const fun = try self.endCompiler();
@@ -244,23 +249,43 @@ fn declareVariable(self: *Self) void {
     self.addLocal(self.parser.previous.lexeme);
 }
 
-fn parseVariable(self: *Self) !u8 {
-    self.consume(.IDENTIFIER, "Expect variable name.");
+fn parseVariable(self: *Self, err_msg: []const u8) !u8 {
+    self.consume(.IDENTIFIER, err_msg);
     self.declareVariable();
     if (self.compiler.?.scope_depth > 0) return 0;
     return makeIdentConstant(self, self.parser.previous.lexeme);
 }
 
+fn markInitialized(self: *Self) void {
+    // mark variable as initialized
+    const compiler = self.compiler.?;
+    compiler.locals.items[compiler.locals.items.len - 1].depth = compiler.scope_depth;
+}
+
 fn defineVariable(self: *Self, constant_idx: u8) !void {
     const compiler = self.compiler.?;
     if (compiler.scope_depth > 0) {
-        // mark variable as initialized
-        compiler.locals.items[compiler.locals.items.len - 1].depth = compiler.scope_depth;
+        self.markInitialized();
         return;
     }
 
     try self.emitOpCode(.DEFINE_GLOBAL);
     try self.emitByte(constant_idx);
+}
+
+fn argumentList(self: *Self) !u8 {
+    var arg_count: u8 = 0;
+    while (!self.check(.RIGHT_PAREN)) {
+        try self.expression();
+        if (arg_count == 255) {
+            self.errorAtPrev("Can't have more than 255 arguments.");
+            return arg_count;
+        }
+        arg_count += 1;
+        if (!self.match(.COMMA)) break;
+    }
+    self.consume(.RIGHT_PAREN, "Expect ')' after arguments.");
+    return arg_count;
 }
 
 fn expression(self: *Self) !void {
@@ -270,6 +295,7 @@ fn expression(self: *Self) !void {
 fn declaration(self: *Self) !void {
     const tok = self.parser.current;
     switch (tok.type) {
+        .FUN => try self.funDeclaration(),
         .VAR => try self.varDeclaration(),
         .IF => try self.ifStatement(),
         .WHILE => try self.whileStatement(),
@@ -281,14 +307,14 @@ fn declaration(self: *Self) !void {
 
 fn varDeclaration(self: *Self) !void {
     self.advance(); // VAR keyword
-    const global_idx = try parseVariable(self);
+    const global_idx = try self.parseVariable("Expect variable name.");
     if (self.match(.EQUAL)) {
         try self.expression();
     } else {
         try self.emitOpCode(.NIL);
     }
     self.consume(.SEMICOLON, "Expect ';' after variable declaration.");
-    try defineVariable(self, global_idx);
+    try self.defineVariable(global_idx);
 }
 
 fn statement(self: *Self) Allocator.Error!void {
@@ -296,12 +322,28 @@ fn statement(self: *Self) Allocator.Error!void {
     switch (tok.type) {
         .PRINT => try self.printStatement(),
         .IF => try self.ifStatement(),
+        .RETURN => try self.returnStatement(),
         .LEFT_BRACE => {
             self.beginScope();
             try self.block();
             try self.endScope();
         },
         else => try self.expressionStatement(),
+    }
+}
+
+fn returnStatement(self: *Self) !void {
+    self.advance(); // RETURN
+    if (self.compiler.?.type == .Script) {
+        self.errorAtPrev("Can't return from top-level code.");
+    }
+    if (self.match(.SEMICOLON)) {
+        try self.emitOpCode(.NIL);
+        try self.emitOpCode(.RETURN);
+    } else {
+        try self.expression();
+        self.consume(.SEMICOLON, "Expect ';' after return statement.");
+        try self.emitOpCode(.RETURN);
     }
 }
 
@@ -399,15 +441,40 @@ fn block(self: *Self) Allocator.Error!void {
 }
 
 fn function(self: *Self, fun_type: FunctionType) !void {
-    self.initCompiler(fun_type);
+    var compiler = try Compiler.init(self.vm, fun_type);
+    try self.initCompiler(&compiler);
     self.beginScope();
 
     self.consume(.LEFT_PAREN, "Expect '(' after function name.");
+    while (!self.check(.RIGHT_PAREN)) {
+        self.compiler.?.function.arity += 1;
+        const const_idx = try self.parseVariable("Expect parameter name.");
+        try self.defineVariable(const_idx);
+        if (self.check(.COMMA)) {
+            self.advance(); // COMMA
+            if (self.compiler.?.function.arity == 255) {
+                self.errorAtCurrent("Can't have more than 255 parameters.");
+                // skip until ')' to avoid recursive panic
+                while (!self.check(.RIGHT_PAREN)) self.advance();
+            }
+        } else break;
+    }
     self.consume(.RIGHT_PAREN, "Expect ')' after parameters.");
-    self.block();
-    const fun = self.endCompiler();
-    self.emitOpCode(.CONSTANT);
-    self.emitByte(self.emitConstant(.{ .Obj = &fun.obj }));
+    if (!self.check(.LEFT_BRACE)) {
+        self.errorAtCurrent("Expect '{' before function body.");
+        return;
+    }
+    try self.block();
+    const fun = try self.endCompiler();
+    try self.emitConstant(.{ .Obj = &fun.obj });
+}
+
+fn funDeclaration(self: *Self) !void {
+    self.advance(); // FUN
+    const fun_name_idx = try self.parseVariable("Expect function name.");
+    self.markInitialized();
+    try self.function(.Function);
+    try self.defineVariable(fun_name_idx);
 }
 
 pub const Compiler = struct {
@@ -421,7 +488,7 @@ pub const Compiler = struct {
 
     pub fn init(vm: *VM, fun_type: FunctionType) !Compiler {
         return Compiler{
-            .locals = try std.ArrayList(Local).initCapacity(vm.allocator, std.math.maxInt(u8)),
+            .locals = try std.ArrayList(Local).initCapacity(vm.allocator, std.math.maxInt(u8) + 1),
             .scope_depth = 0,
             .function = try ObjFunction.init(vm),
             .type = fun_type,
@@ -489,7 +556,7 @@ const ParseRule = struct {
 const ParseRuleArray = std.EnumArray(TokenType, ParseRule);
 const Rules = ParseRuleArray.init(.{
     // Single-character tokens.
-    .LEFT_PAREN = .{ .prefix = grouping },
+    .LEFT_PAREN = .{ .prefix = grouping, .infix = call, .precedence = .CALL },
     .RIGHT_PAREN = .{},
     .LEFT_BRACE = .{},
     .RIGHT_BRACE = .{},
@@ -596,6 +663,13 @@ fn binary(self: *Self, can_assign: bool) Allocator.Error!void {
             unreachable;
         },
     };
+}
+
+fn call(self: *Self, can_assign: bool) Allocator.Error!void {
+    _ = can_assign;
+    const arg_count = try self.argumentList();
+    try self.emitOpCode(.CALL);
+    try self.emitByte(arg_count);
 }
 
 fn literal(self: *Self, can_assign: bool) Allocator.Error!void {

@@ -1,8 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const print = std.debug.print;
 const testing = std.testing;
-
-const dbg = @import("builtin").mode == .Debug;
 
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
@@ -16,6 +15,8 @@ const debug = @import("debug.zig");
 const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
 
+const dbg = @import("builtin").mode == .Debug;
+
 const FRAME_MAX = 64;
 const STACK_MAX = FRAME_MAX * std.math.maxInt(u8);
 
@@ -27,7 +28,7 @@ pub const InterpretError = error{
 const CallFrame = struct {
     function: *ObjFunction,
     ip: usize,
-    slots: []Value,
+    start: usize,
 };
 
 pub const VM = struct {
@@ -102,30 +103,24 @@ pub const VM = struct {
     }
 
     fn interpret(self: *VM, source: []const u8) !void {
-        self.resetStack();
-
         var compiler = try Compiler.init(self, source);
         const function = compiler.compile() catch return InterpretError.CompileError;
 
         try self.push(.{ .Obj = &function.obj });
-        try self.frames.append(.{
-            .function = function,
-            .ip = 0,
-            .slots = self.stack.items,
-        });
+        try self.call(function, 0);
 
         return self.run();
     }
 
     fn run(self: *VM) !void {
-        const frame = &self.frames.items[self.frames.items.len - 1];
+        var frame = &self.frames.items[self.frames.items.len - 1];
         while (frame.ip < frame.function.chunk.code.items.len) {
             if (dbg) {
-                std.debug.print("          ", .{});
+                print("          ", .{});
                 for (self.stack.items) |slot| {
-                    std.debug.print("[ {} ]", .{slot});
+                    print("[ {} ]", .{slot});
                 }
-                std.debug.print("\n", .{});
+                print("\n", .{});
                 _ = debug.disassembleInstruction(&frame.function.chunk, frame.ip);
             }
             const instruction: _chunk.OpCode = @enumFromInt(self.readByte());
@@ -135,13 +130,12 @@ pub const VM = struct {
                 .TRUE => try self.push(.{ .Bool = true }),
                 .FALSE => try self.push(.{ .Bool = false }),
                 .POP => _ = self.pop(),
-                .GET_LOCAL => try self.push(frame.slots[self.readByte()]),
-                .SET_LOCAL => frame.slots[self.readByte()] = self.peek(0).?,
+                .GET_LOCAL => try self.push(self.stack.items[frame.start + self.readByte()]),
+                .SET_LOCAL => self.stack.items[frame.start + self.readByte()] = self.peek(0).?,
                 .GET_GLOBAL => {
                     const name = self.readString();
                     const val = self.globals.get(name) orelse {
-                        self.runtimeError("Undefined variable '{s}'.", .{name.chars});
-                        return InterpretError.RuntimeError;
+                        return self.runtimeError("Undefined variable '{s}'.\n", .{name.chars});
                     };
                     try self.push(val);
                 },
@@ -154,8 +148,7 @@ pub const VM = struct {
                     const name = self.readString();
                     if (try self.globals.set(name, self.peek(0).?)) {
                         _ = self.globals.delete(name);
-                        self.runtimeError("Undefined variable '{s}'.", .{name.chars});
-                        return InterpretError.RuntimeError;
+                        return self.runtimeError("Undefined variable '{s}'.\n", .{name.chars});
                     }
                 },
                 .EQUAL => try self.equalOp(),
@@ -168,12 +161,9 @@ pub const VM = struct {
                     const lhs = self.peek(1).?;
                     if (rhs.is(.Number) and lhs.is(.Number)) {
                         try self.binaryOp(.ADD);
-                    } else {
-                        errdefer self.runtimeError("Operands must be strings or numbers.", .{});
-                        if (rhs.isObj(.String) and lhs.isObj(.String)) {
-                            try self.concatenate();
-                        } else return error.RuntimeError;
-                    }
+                    } else if (rhs.isObj(.String) and lhs.isObj(.String)) {
+                        try self.concatenate();
+                    } else return self.runtimeError("Operands must be strings or numbers.\n", .{});
                 },
                 .SUBTRACT => try self.binaryOp(.SUBTRACT),
                 .MULTIPLY => try self.binaryOp(.MULTIPLY),
@@ -199,19 +189,44 @@ pub const VM = struct {
                     const offset = self.readShort();
                     frame.ip -= offset;
                 },
+                .CALL => {
+                    const arg_count = self.readByte();
+                    try self.callValue(self.peek(arg_count).?, arg_count);
+                    frame = &self.frames.items[self.frames.items.len - 1];
+                },
                 .RETURN => {
-                    // std.debug.print("{}\n", .{self.pop().?});
-                    return;
+                    const result = self.pop().?;
+                    _ = self.frames.pop();
+                    if (self.frames.items.len == 0) {
+                        _ = self.pop();
+                        return;
+                    }
+
+                    // WARNING:
+                    self.stack.shrinkRetainingCapacity(frame.start);
+                    try self.push(result);
+                    frame = &self.frames.items[self.frames.items.len - 1];
                 },
             }
         }
     }
 
-    fn runtimeError(self: *VM, comptime fmt: []const u8, args: anytype) void {
-        const frame = &self.frames.items[self.frames.items.len - 1];
-        std.debug.print(fmt, args);
-        std.debug.print("\n[line {d}] in script\n", .{frame.function.chunk.lines.items[frame.ip - 1]});
-        self.resetStack();
+    fn runtimeError(self: *VM, comptime fmt: []const u8, args: anytype) !void {
+        print(fmt, args);
+        var i = self.frames.items.len;
+        while (i > 0) : (i -= 1) {
+            const frame = self.frames.items[i - 1];
+            const function = frame.function;
+            const instruction = frame.ip - 1;
+            print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
+            if (function.name) |obj| {
+                print("{s}()\n", .{obj.chars});
+            } else {
+                print("script\n", .{});
+            }
+        }
+        self.resetState();
+        return InterpretError.RuntimeError;
     }
 
     inline fn readByte(self: *VM) u8 {
@@ -252,7 +267,8 @@ pub const VM = struct {
         return self.stack.append(val);
     }
 
-    fn resetStack(self: *VM) void {
+    fn resetState(self: *VM) void {
+        self.frames.clearRetainingCapacity();
         self.stack.clearRetainingCapacity();
     }
 
@@ -260,16 +276,14 @@ pub const VM = struct {
         switch (self.pop().?) {
             .Number => |val| try self.push(.{ .Number = -val }),
             else => {
-                self.runtimeError("Operand must be a number.", .{});
-                return InterpretError.RuntimeError;
+                return self.runtimeError("Operand must be a number.\n", .{});
             },
         }
     }
 
     fn binaryOp(self: *VM, comptime op: OpCode) !void {
-        const b = self.pop().?.as(.Number) orelse return InterpretError.RuntimeError;
-        const a = self.pop().?.as(.Number) orelse return InterpretError.RuntimeError;
-        errdefer self.runtimeError("Operand must be numbers.", .{});
+        const b = self.pop().?.as(.Number) orelse return self.runtimeError("Operand must be numbers.\n", .{});
+        const a = self.pop().?.as(.Number) orelse return self.runtimeError("Operand must be numbers.\n", .{});
 
         try self.push(switch (op) {
             .ADD => .{ .Number = a + b },
@@ -299,6 +313,33 @@ pub const VM = struct {
         const b = self.pop().?;
         const a = self.pop().?;
         try self.push(.{ .Bool = a.eql(b) });
+    }
+
+    fn callValue(self: *VM, callee: Value, arg_count: u8) !void {
+        if (callee.is(.Obj)) {
+            switch (callee.Obj.type) {
+                .Function => return self.call(callee.asObj(.Function).?, arg_count),
+                else => {},
+            }
+        }
+        return self.runtimeError("Can only call functions and classes.\n", .{});
+    }
+
+    fn call(self: *VM, function: *ObjFunction, arg_count: u8) !void {
+        if (arg_count != function.arity) {
+            return self.runtimeError("Expect {d} arguments but got {d}.\n", .{ function.arity, arg_count });
+        }
+
+        if (self.frames.items.len == FRAME_MAX) {
+            return self.runtimeError("Stack overflow.\n", .{});
+        }
+        // zig fmt: off
+        try self.frames.append(.{
+            .function = function,
+            .ip = 0,
+            .start = self.stack.items.len - arg_count - 1,
+        });
+        // zig fmt: on
     }
 };
 
