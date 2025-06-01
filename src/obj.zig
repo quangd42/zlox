@@ -35,6 +35,13 @@ pub const Type = enum {
     }
 };
 
+fn allocateObj(vm: *VM, comptime obj_type: Type) !*obj_type.VariantType() {
+    const out = try vm.allocator.create(obj_type.VariantType());
+    out.obj = .{ .type = obj_type, .next = vm.objects };
+    vm.objects = &out.obj;
+    return out;
+}
+
 pub const FunctionType = enum {
     Function,
     Script,
@@ -48,24 +55,16 @@ pub const Function = struct {
 
     const Self = @This();
     pub fn init(vm: *VM) !*Self {
-        return allocate(vm);
+        const out = try allocateObj(vm, .Function);
+        out.arity = 0;
+        out.chunk = try Chunk.init(vm.allocator);
+        out.name = null;
+        return out;
     }
 
     pub fn deinit(self: *Self, vm: *VM) void {
         self.chunk.deinit();
         vm.allocator.destroy(self);
-    }
-
-    fn allocate(vm: *VM) !*Self {
-        const out = try vm.allocator.create(Self);
-        out.* = .{
-            .obj = .{ .type = .Function, .next = vm.objects },
-            .arity = 0,
-            .chunk = try Chunk.init(vm.allocator),
-            .name = null,
-        };
-        vm.objects = &out.obj;
-        return out;
     }
 
     pub fn eql(self: *Self, other: *Self) bool {
@@ -95,12 +94,8 @@ pub const Native = struct {
     const Self = @This();
 
     pub fn init(vm: *VM, function: NativeFn) !*Self {
-        const out = try vm.allocator.create(Self);
-        out.* = .{
-            .obj = .{ .type = .Native, .next = vm.objects },
-            .function = function,
-        };
-        vm.objects = &out.obj;
+        const out = try allocateObj(vm, .Native);
+        out.function = function;
         return out;
     }
 
@@ -132,7 +127,7 @@ pub const String = struct {
         const interned = vm.strings.findString(chars, hash);
         if (interned) |s| return s;
         const duped = try vm.allocator.dupe(u8, chars);
-        return allocate(vm, duped, hash);
+        return allocateString(vm, duped, hash);
     }
 
     pub fn deinit(self: *String, vm: *VM) void {
@@ -140,14 +135,10 @@ pub const String = struct {
         vm.allocator.destroy(self);
     }
 
-    fn allocate(vm: *VM, chars: []const u8, hash: u32) !*String {
-        const out = try vm.allocator.create(String);
-        out.* = .{
-            .hash = hash,
-            .chars = chars,
-            .obj = .{ .type = .String, .next = vm.objects },
-        };
-        vm.objects = &out.obj;
+    fn allocateString(vm: *VM, chars: []const u8, hash: u32) !*String {
+        const out = try allocateObj(vm, .String);
+        out.hash = hash;
+        out.chars = chars;
         _ = try vm.strings.set(out, .{ .Nil = {} });
         return out;
     }
@@ -162,7 +153,7 @@ pub const String = struct {
             vm.allocator.free(buffer);
             return s;
         }
-        return allocate(vm, buffer, hash);
+        return allocateString(vm, buffer, hash);
     }
 
     pub fn eql(self: *String, other: *String) bool {
