@@ -22,12 +22,14 @@ pub const Obj = struct {
 };
 
 pub const Type = enum {
+    Closure,
     Function,
     Native,
     String,
 
     pub fn VariantType(comptime self: @This()) type {
         return switch (self) {
+            .Closure => Closure,
             .Function => Function,
             .Native => Native,
             .String => String,
@@ -212,3 +214,33 @@ test "fnv hash" {
     try testing.expect(fnvHash("foobar") == 0xbf9cf968);
     try testing.expectEqual(stdfnv.hash("foobar"), fnvHash("foobar"));
 }
+
+pub const Closure = struct {
+    obj: Obj,
+    function: *Function,
+
+    const Self = @This();
+
+    pub fn init(vm: *VM, function: *Function) !*Self {
+        const out = try allocateObj(vm, .Closure);
+        out.function = function;
+        return out;
+    }
+
+    pub fn deinit(self: *Self, vm: *VM) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub fn eql(self: *Self, other: *Self) bool {
+        return self == other;
+    }
+
+    pub fn format(
+        self: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("{}", .{self.function});
+    }
+};

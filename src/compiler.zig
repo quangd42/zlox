@@ -466,7 +466,10 @@ fn function(self: *Self, fun_type: FunctionType) !void {
     }
     try self.block();
     const fun = try self.endCompiler();
-    try self.emitConstant(.{ .Obj = &fun.obj });
+    // try self.emitConstant(.{ .Obj = &fun.obj });
+    const const_idx = self.chunk().addConstant(.{ .Obj = &fun.obj });
+    try self.emitOpCode(.CLOSURE);
+    try self.emitByte(const_idx);
 }
 
 fn funDeclaration(self: *Self) !void {

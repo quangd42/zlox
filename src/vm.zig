@@ -10,6 +10,7 @@ const _obj = @import("obj.zig");
 const Obj = _obj.Obj;
 const ObjString = _obj.String;
 const ObjFunction = _obj.Function;
+const ObjClosure = _obj.Closure;
 const ObjNative = _obj.Native;
 const NativeFn = _obj.NativeFn;
 const Compiler = @import("compiler.zig");
@@ -28,7 +29,7 @@ pub const InterpretError = error{
 } || Allocator.Error;
 
 const CallFrame = struct {
-    function: *ObjFunction,
+    closure: *ObjClosure,
     ip: usize,
     start: usize,
 };
@@ -114,21 +115,24 @@ pub const VM = struct {
         const function = compiler.compile() catch return InterpretError.CompileError;
 
         try self.push(.{ .Obj = &function.obj });
-        try self.call(function, 0);
+        const closure = try ObjClosure.init(self, function);
+        _ = self.pop();
+        try self.push(.{ .Obj = &closure.obj });
+        try self.call(closure, 0);
 
         return self.run();
     }
 
     fn run(self: *VM) !void {
         var frame = &self.frames.items[self.frames.items.len - 1];
-        while (frame.ip < frame.function.chunk.code.items.len) {
+        while (frame.ip < frame.closure.function.chunk.code.items.len) {
             if (dbg) {
                 print("          ", .{});
                 for (self.stack.items) |slot| {
                     print("[ {} ]", .{slot});
                 }
                 print("\n", .{});
-                _ = debug.disassembleInstruction(&frame.function.chunk, frame.ip);
+                _ = debug.disassembleInstruction(&frame.closure.function.chunk, frame.ip);
             }
             const instruction: _chunk.OpCode = @enumFromInt(self.readByte());
             switch (instruction) {
@@ -201,6 +205,11 @@ pub const VM = struct {
                     try self.callValue(self.peek(arg_count).?, arg_count);
                     frame = &self.frames.items[self.frames.items.len - 1];
                 },
+                .CLOSURE => {
+                    const function = self.readConstant().asObj(.Function).?;
+                    const closure = try ObjClosure.init(self, function);
+                    try self.push(.{ .Obj = &closure.obj });
+                },
                 .RETURN => {
                     const result = self.pop().?;
                     _ = self.frames.pop();
@@ -209,7 +218,6 @@ pub const VM = struct {
                         return;
                     }
 
-                    // WARNING:
                     self.stack.shrinkRetainingCapacity(frame.start);
                     try self.push(result);
                     frame = &self.frames.items[self.frames.items.len - 1];
@@ -223,7 +231,7 @@ pub const VM = struct {
         var i = self.frames.items.len;
         while (i > 0) : (i -= 1) {
             const frame = self.frames.items[i - 1];
-            const function = frame.function;
+            const function = frame.closure.function;
             const instruction = frame.ip - 1;
             print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
             if (function.name) |obj| {
@@ -250,13 +258,13 @@ pub const VM = struct {
     inline fn readByte(self: *VM) u8 {
         const frame = &self.frames.items[self.frames.items.len - 1];
         frame.ip += 1;
-        return frame.function.chunk.getByteAt(frame.ip - 1) catch unreachable;
+        return frame.closure.function.chunk.getByteAt(frame.ip - 1) catch unreachable;
     }
 
     inline fn readConstant(self: *VM) Value {
         const frame = &self.frames.getLast();
         const constant_idx = self.readByte();
-        return frame.function.chunk.getConstantAt(constant_idx) catch unreachable;
+        return frame.closure.function.chunk.getConstantAt(constant_idx) catch unreachable;
     }
 
     inline fn readShort(self: *VM) u16 {
@@ -336,7 +344,7 @@ pub const VM = struct {
     fn callValue(self: *VM, callee: Value, arg_count: u8) !void {
         if (callee.is(.Obj)) {
             switch (callee.Obj.type) {
-                .Function => return self.call(callee.asObj(.Function).?, arg_count),
+                .Closure => return self.call(callee.asObj(.Closure).?, arg_count),
                 .Native => return {
                     const native = callee.asObj(.Native).?.function;
                     const val_start_idx = self.stack.items.len - arg_count;
@@ -350,9 +358,9 @@ pub const VM = struct {
         return self.runtimeError("Can only call functions and classes.\n", .{});
     }
 
-    fn call(self: *VM, function: *ObjFunction, arg_count: u8) !void {
-        if (arg_count != function.arity) {
-            return self.runtimeError("Expect {d} arguments but got {d}.\n", .{ function.arity, arg_count });
+    fn call(self: *VM, closure: *ObjClosure, arg_count: u8) !void {
+        if (arg_count != closure.function.arity) {
+            return self.runtimeError("Expect {d} arguments but got {d}.\n", .{ closure.function.arity, arg_count });
         }
 
         if (self.frames.items.len == FRAME_MAX) {
@@ -360,7 +368,7 @@ pub const VM = struct {
         }
         // zig fmt: off
         try self.frames.append(.{
-            .function = function,
+            .closure = closure,
             .ip = 0,
             .start = self.stack.items.len - arg_count - 1,
         });

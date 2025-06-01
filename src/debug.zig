@@ -30,6 +30,11 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .SET_LOCAL, .GET_LOCAL, .CALL => byteInstruction(oc, chunk, offset),
         .JUMP, .JUMP_IF_TRUE, .JUMP_IF_FALSE => jumpInstruction(oc, 1, chunk, offset),
         .LOOP => jumpInstruction(oc, -1, chunk, offset),
+        .CLOSURE => blk: {
+            const constant = chunk.code.items[offset + 1];
+            print("{s:-<16} {d:4} {}\n", .{ @tagName(oc), constant, chunk.constants.items[constant] });
+            break :blk offset + 2;
+        },
         else => simpleInstruction(oc, offset),
     };
 }
