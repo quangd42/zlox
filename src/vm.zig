@@ -13,6 +13,7 @@ const ObjFunction = _obj.Function;
 const ObjClosure = _obj.Closure;
 const ObjNative = _obj.Native;
 const NativeFn = _obj.NativeFn;
+const ObjUpvalue = _obj.Upvalue;
 const Compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
 const Table = @import("table.zig").Table;
@@ -124,7 +125,7 @@ pub const VM = struct {
     }
 
     fn run(self: *VM) !void {
-        var frame = &self.frames.items[self.frames.items.len - 1];
+        var frame = self.topFrame();
         while (frame.ip < frame.closure.function.chunk.code.items.len) {
             if (dbg) {
                 print("          ", .{});
@@ -141,8 +142,8 @@ pub const VM = struct {
                 .TRUE => try self.push(.{ .Bool = true }),
                 .FALSE => try self.push(.{ .Bool = false }),
                 .POP => _ = self.pop(),
-                .GET_LOCAL => try self.push(self.stack.items[frame.start + self.readByte()]),
-                .SET_LOCAL => self.stack.items[frame.start + self.readByte()] = self.peek(0).?,
+                .GET_LOCAL => try self.push(self.frameSlotAt(frame, self.readByte()).*),
+                .SET_LOCAL => self.frameSlotAt(frame, self.readByte()).* = self.peek(0).?,
                 .GET_GLOBAL => {
                     const name = self.readString();
                     const val = self.globals.get(name) orelse {
@@ -161,6 +162,14 @@ pub const VM = struct {
                         _ = self.globals.delete(name);
                         return self.runtimeError("Undefined variable '{s}'.\n", .{name.chars});
                     }
+                },
+                .SET_UPVALUE => {
+                    const slot = self.readByte();
+                    frame.closure.upvalues.items[slot].location.* = self.peek(0).?;
+                },
+                .GET_UPVALUE => {
+                    const slot = self.readByte();
+                    try self.push(frame.closure.upvalues.items[slot].location.*);
                 },
                 .EQUAL => try self.equalOp(),
                 .GREATER => try self.binaryOp(.GREATER),
@@ -203,12 +212,22 @@ pub const VM = struct {
                 .CALL => {
                     const arg_count = self.readByte();
                     try self.callValue(self.peek(arg_count).?, arg_count);
-                    frame = &self.frames.items[self.frames.items.len - 1];
+                    frame = self.topFrame();
                 },
                 .CLOSURE => {
                     const function = self.readConstant().asObj(.Function).?;
                     const closure = try ObjClosure.init(self, function);
                     try self.push(.{ .Obj = &closure.obj });
+                    // closure.upvalues was inited with the correct amount of upvalue slots
+                    for (0..closure.upvalues.capacity) |_| {
+                        const is_local = self.readByte();
+                        const index = self.readByte();
+                        if (is_local == 1) {
+                            closure.upvalues.appendAssumeCapacity(try self.captureUpvalue(self.frameSlotAt(frame, index)));
+                        } else {
+                            closure.upvalues.appendAssumeCapacity(frame.closure.upvalues.items[index]);
+                        }
+                    }
                 },
                 .RETURN => {
                     const result = self.pop().?;
@@ -220,7 +239,7 @@ pub const VM = struct {
 
                     self.stack.shrinkRetainingCapacity(frame.start);
                     try self.push(result);
-                    frame = &self.frames.items[self.frames.items.len - 1];
+                    frame = self.topFrame();
                 },
             }
         }
@@ -256,7 +275,7 @@ pub const VM = struct {
     }
 
     inline fn readByte(self: *VM) u8 {
-        const frame = &self.frames.items[self.frames.items.len - 1];
+        const frame = self.topFrame();
         frame.ip += 1;
         return frame.closure.function.chunk.getByteAt(frame.ip - 1) catch unreachable;
     }
@@ -296,6 +315,14 @@ pub const VM = struct {
     fn resetState(self: *VM) void {
         self.frames.clearRetainingCapacity();
         self.stack.clearRetainingCapacity();
+    }
+
+    inline fn topFrame(self: *VM) *CallFrame {
+        return &self.frames.items[self.frames.items.len - 1];
+    }
+
+    inline fn frameSlotAt(self: *VM, frame: *CallFrame, slot: u8) *Value {
+        return &self.stack.items[frame.start + slot];
     }
 
     fn negateOp(self: *VM) !void {
@@ -356,6 +383,11 @@ pub const VM = struct {
             }
         }
         return self.runtimeError("Can only call functions and classes.\n", .{});
+    }
+
+    fn captureUpvalue(self: *VM, local: *Value) !*ObjUpvalue {
+        const createdUpvalue = try ObjUpvalue.init(self, local);
+        return createdUpvalue;
     }
 
     fn call(self: *VM, closure: *ObjClosure, arg_count: u8) !void {

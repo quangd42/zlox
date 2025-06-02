@@ -27,13 +27,27 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     const oc: OpCode = @enumFromInt(chunk.getByteAt(offset) catch unreachable);
     return switch (oc) {
         .CONSTANT, .DEFINE_GLOBAL, .GET_GLOBAL, .SET_GLOBAL => constantInstruction(oc, chunk, offset),
-        .SET_LOCAL, .GET_LOCAL, .CALL => byteInstruction(oc, chunk, offset),
+        .SET_LOCAL, .GET_LOCAL, .CALL, .GET_UPVALUE, .SET_UPVALUE => byteInstruction(oc, chunk, offset),
         .JUMP, .JUMP_IF_TRUE, .JUMP_IF_FALSE => jumpInstruction(oc, 1, chunk, offset),
         .LOOP => jumpInstruction(oc, -1, chunk, offset),
         .CLOSURE => blk: {
-            const constant = chunk.code.items[offset + 1];
+            var idx = offset + 1;
+            const constant = chunk.code.items[idx];
+            idx += 1;
             print("{s:-<16} {d:4} {}\n", .{ @tagName(oc), constant, chunk.constants.items[constant] });
-            break :blk offset + 2;
+            const fun = chunk.constants.items[constant].asObj(.Function).?;
+            var j: u8 = 0;
+            while (j < fun.upvalue_count) : (j += 1) {
+                const is_local = chunk.code.items[idx + 1] == 1;
+                const index = chunk.code.items[idx + 2];
+                print("{d:4}      |                     {s} {d}\n", .{
+                    idx,
+                    if (is_local) "local" else "upvalue",
+                    index,
+                });
+                idx += 2;
+            }
+            break :blk idx;
         },
         else => simpleInstruction(oc, offset),
     };

@@ -222,10 +222,10 @@ fn addLocal(self: *Self, lexeme: []const u8) void {
     self.compiler.?.locals.appendAssumeCapacity(.{ .lexeme = lexeme, .depth = null });
 }
 
-fn resolveLocal(self: *Self, lexeme: []const u8) ?u8 {
-    var i = self.compiler.?.locals.items.len;
+fn resolveLocal(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
+    var i = compiler.locals.items.len;
     while (i > 0) : (i -= 1) {
-        const local = self.compiler.?.locals.items[i - 1];
+        const local = compiler.locals.items[i - 1];
         if (std.mem.eql(u8, local.lexeme, lexeme)) {
             if (local.depth == null) {
                 self.errorAtPrev("Can't read local variable in its own initializer.");
@@ -233,6 +233,35 @@ fn resolveLocal(self: *Self, lexeme: []const u8) ?u8 {
             return @intCast(i - 1);
         }
     }
+    return null;
+}
+
+fn addUpvalue(self: *Self, compiler: *Compiler, index: u8, is_local: bool) u8 {
+    const upvalue_count = &compiler.function.upvalue_count;
+    for (0..upvalue_count.*) |i| {
+        const upvalue = &compiler.upvalues[i];
+        if (upvalue.index == index and upvalue.is_local == is_local) return @intCast(i);
+    }
+
+    if (upvalue_count.* == std.math.maxInt(u8)) {
+        self.errorAtPrev("Too many closure variable in function.");
+        return 0;
+    }
+
+    compiler.upvalues[upvalue_count.*] = .{ .index = index, .is_local = is_local };
+    upvalue_count.* += 1;
+    return upvalue_count.* - 1;
+}
+
+fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
+    const enclosing = compiler.enclosing orelse return null;
+
+    const local = self.resolveLocal(enclosing, lexeme);
+    if (local) |idx| return self.addUpvalue(self.compiler.?, idx, true);
+
+    const upvalue = self.resolveUpvalue(enclosing, lexeme);
+    if (upvalue) |idx| return self.addUpvalue(self.compiler.?, idx, false);
+
     return null;
 }
 
@@ -466,10 +495,14 @@ fn function(self: *Self, fun_type: FunctionType) !void {
     }
     try self.block();
     const fun = try self.endCompiler();
-    // try self.emitConstant(.{ .Obj = &fun.obj });
     const const_idx = self.chunk().addConstant(.{ .Obj = &fun.obj });
     try self.emitOpCode(.CLOSURE);
     try self.emitByte(const_idx);
+
+    for (0..fun.upvalue_count) |i| {
+        try self.emitByte(@intFromBool(compiler.upvalues[i].is_local));
+        try self.emitByte(compiler.upvalues[i].index);
+    }
 }
 
 fn funDeclaration(self: *Self) !void {
@@ -485,14 +518,17 @@ pub const Compiler = struct {
 
     locals: std.ArrayList(Local),
     scope_depth: u8,
+    upvalues: [u8_max]Upvalue,
 
     function: *ObjFunction,
     type: FunctionType,
 
+    const u8_max = std.math.maxInt(u8);
     pub fn init(vm: *VM, fun_type: FunctionType) !Compiler {
         return Compiler{
-            .locals = try std.ArrayList(Local).initCapacity(vm.allocator, std.math.maxInt(u8) + 1),
+            .locals = try std.ArrayList(Local).initCapacity(vm.allocator, u8_max),
             .scope_depth = 0,
+            .upvalues = [_]Upvalue{.{ .index = 0, .is_local = false }} ** u8_max,
             .function = try ObjFunction.init(vm),
             .type = fun_type,
         };
@@ -522,6 +558,11 @@ test "compiler init & parse simple expression" {
 const Local = struct {
     lexeme: []const u8,
     depth: ?u8,
+};
+
+const Upvalue = struct {
+    index: u8,
+    is_local: bool,
 };
 
 const Parser = struct {
@@ -694,15 +735,19 @@ fn string(self: *Self, can_assign: bool) Allocator.Error!void {
 fn namedVariable(self: *Self, lexeme: []const u8, can_assign: bool) !void {
     var getOp: OpCode = .GET_LOCAL;
     var setOp: OpCode = .SET_LOCAL;
-    var const_idx: u8 = 0;
-    const local_idx = self.resolveLocal(lexeme);
-    if (local_idx) |idx| {
-        const_idx = idx;
-    } else {
+    const const_idx: u8 = blk: {
+        if (self.resolveLocal(self.compiler.?, lexeme)) |idx| {
+            break :blk idx;
+        }
+        if (self.resolveUpvalue(self.compiler.?, lexeme)) |idx| {
+            getOp = .GET_UPVALUE;
+            setOp = .SET_UPVALUE;
+            break :blk idx;
+        }
         getOp = .GET_GLOBAL;
         setOp = .SET_GLOBAL;
-        const_idx = try self.makeIdentConstant(lexeme);
-    }
+        break :blk try self.makeIdentConstant(lexeme);
+    };
     if (can_assign and self.match(.EQUAL)) {
         try self.expression();
         try self.emitOpCode(setOp);

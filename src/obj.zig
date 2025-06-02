@@ -26,6 +26,7 @@ pub const Type = enum {
     Function,
     Native,
     String,
+    Upvalue,
 
     pub fn VariantType(comptime self: @This()) type {
         return switch (self) {
@@ -33,6 +34,7 @@ pub const Type = enum {
             .Function => Function,
             .Native => Native,
             .String => String,
+            .Upvalue => Upvalue,
         };
     }
 };
@@ -52,6 +54,7 @@ pub const FunctionType = enum {
 pub const Function = struct {
     obj: Obj,
     arity: u8,
+    upvalue_count: u8,
     chunk: Chunk,
     name: ?*String,
 
@@ -59,6 +62,7 @@ pub const Function = struct {
     pub fn init(vm: *VM) !*Self {
         const out = try allocateObj(vm, .Function);
         out.arity = 0;
+        out.upvalue_count = 0;
         out.chunk = try Chunk.init(vm.allocator);
         out.name = null;
         return out;
@@ -215,19 +219,52 @@ test "fnv hash" {
     try testing.expectEqual(stdfnv.hash("foobar"), fnvHash("foobar"));
 }
 
+pub const Upvalue = struct {
+    obj: Obj,
+    location: *Value,
+
+    const Self = @This();
+
+    pub fn init(vm: *VM, slot: *Value) !*Self {
+        const out = try allocateObj(vm, .Upvalue);
+        out.location = slot;
+        return out;
+    }
+
+    pub fn deinit(self: *Self, vm: *VM) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub fn eql(self: *Self, other: *Self) bool {
+        return self == other;
+    }
+
+    pub fn format(
+        _: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.writeAll("upvalue");
+    }
+};
+
 pub const Closure = struct {
     obj: Obj,
     function: *Function,
+    upvalues: std.ArrayList(*Upvalue),
 
     const Self = @This();
 
     pub fn init(vm: *VM, function: *Function) !*Self {
         const out = try allocateObj(vm, .Closure);
         out.function = function;
+        out.upvalues = try std.ArrayList(*Upvalue).initCapacity(vm.allocator, function.upvalue_count);
         return out;
     }
 
     pub fn deinit(self: *Self, vm: *VM) void {
+        self.upvalues.deinit();
         vm.allocator.destroy(self);
     }
 
