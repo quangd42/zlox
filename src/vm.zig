@@ -40,6 +40,7 @@ pub const VM = struct {
     stack: std.ArrayList(Value),
     chunk: *Chunk = undefined,
     objects: ?*Obj = null,
+    open_upvalues: ?*ObjUpvalue = null,
     strings: Table,
     globals: Table,
     allocator: Allocator,
@@ -163,13 +164,13 @@ pub const VM = struct {
                         return self.runtimeError("Undefined variable '{s}'.\n", .{name.chars});
                     }
                 },
-                .SET_UPVALUE => {
-                    const slot = self.readByte();
-                    frame.closure.upvalues.items[slot].location.* = self.peek(0).?;
-                },
                 .GET_UPVALUE => {
                     const slot = self.readByte();
-                    try self.push(frame.closure.upvalues.items[slot].location.*);
+                    try self.push(frame.closure.upvalues.items[slot].location[0]);
+                },
+                .SET_UPVALUE => {
+                    const slot = self.readByte();
+                    frame.closure.upvalues.items[slot].location[0] = self.peek(0).?;
                 },
                 .EQUAL => try self.equalOp(),
                 .GREATER => try self.binaryOp(.GREATER),
@@ -223,14 +224,19 @@ pub const VM = struct {
                         const is_local = self.readByte();
                         const index = self.readByte();
                         if (is_local == 1) {
-                            closure.upvalues.appendAssumeCapacity(try self.captureUpvalue(self.frameSlotAt(frame, index)));
+                            closure.upvalues.appendAssumeCapacity(try self.captureUpvalue(self.stack.items.ptr + frame.start + index));
                         } else {
                             closure.upvalues.appendAssumeCapacity(frame.closure.upvalues.items[index]);
                         }
                     }
                 },
+                .CLOSE_UPVALUE => {
+                    self.closeUpvalues(self.stack.items.ptr + self.stack.items.len - 1);
+                    _ = self.pop();
+                },
                 .RETURN => {
                     const result = self.pop().?;
+                    self.closeUpvalues(self.stack.items.ptr + frame.start);
                     _ = self.frames.pop();
                     if (self.frames.items.len == 0) {
                         _ = self.pop();
@@ -385,9 +391,34 @@ pub const VM = struct {
         return self.runtimeError("Can only call functions and classes.\n", .{});
     }
 
-    fn captureUpvalue(self: *VM, local: *Value) !*ObjUpvalue {
-        const createdUpvalue = try ObjUpvalue.init(self, local);
+    fn captureUpvalue(self: *VM, local: [*]Value) !*ObjUpvalue {
+        var prev: ?*ObjUpvalue = null;
+        var cur: ?*ObjUpvalue = self.open_upvalues;
+        while (cur) |value| {
+            if (value.location - local > 0) {
+                prev = value;
+                cur = value.next;
+                continue;
+            }
+            if (value.location == local) return value;
+            break;
+        }
+        var createdUpvalue = try ObjUpvalue.init(self, local);
+        createdUpvalue.next = cur;
+        if (prev) |p| {
+            p.next = createdUpvalue;
+        } else {
+            self.open_upvalues = createdUpvalue;
+        }
         return createdUpvalue;
+    }
+
+    fn closeUpvalues(self: *VM, last: [*]Value) void {
+        while (self.open_upvalues) |upvalue| : (self.open_upvalues = upvalue.next) {
+            if (upvalue.location - last < 0) break;
+            upvalue.closed = upvalue.location[0];
+            upvalue.location = @ptrCast(&upvalue.closed);
+        }
     }
 
     fn call(self: *VM, closure: *ObjClosure, arg_count: u8) !void {

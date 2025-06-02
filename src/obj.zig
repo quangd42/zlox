@@ -221,13 +221,16 @@ test "fnv hash" {
 
 pub const Upvalue = struct {
     obj: Obj,
-    location: *Value,
+    location: [*]Value,
+    closed: Value,
+    next: ?*Self = null,
 
     const Self = @This();
 
-    pub fn init(vm: *VM, slot: *Value) !*Self {
+    pub fn init(vm: *VM, slot: [*]Value) !*Self {
         const out = try allocateObj(vm, .Upvalue);
         out.location = slot;
+        out.closed = Value.Nil;
         return out;
     }
 

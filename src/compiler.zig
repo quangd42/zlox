@@ -80,11 +80,16 @@ fn beginScope(self: *Self) void {
 }
 
 fn endScope(self: *Self) !void {
-    const compiler = self.compiler.?;
-    compiler.scope_depth -= 1;
-    while (compiler.locals.items.len > 0 and compiler.locals.getLast().depth.? > compiler.scope_depth) {
-        try self.emitOpCode(.POP);
-        _ = compiler.locals.pop();
+    const scope_depth = &self.compiler.?.scope_depth;
+    scope_depth.* -= 1;
+    var locals = self.compiler.?.locals;
+    while (locals.items.len > 0 and locals.getLast().depth.? > scope_depth.*) {
+        if (locals.getLast().is_captured) {
+            try self.emitOpCode(.CLOSE_UPVALUE);
+        } else {
+            try self.emitOpCode(.POP);
+        }
+        _ = locals.pop();
     }
 }
 
@@ -257,7 +262,10 @@ fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
     const enclosing = compiler.enclosing orelse return null;
 
     const local = self.resolveLocal(enclosing, lexeme);
-    if (local) |idx| return self.addUpvalue(self.compiler.?, idx, true);
+    if (local) |idx| {
+        compiler.enclosing.?.locals.items[idx].is_captured = true;
+        return self.addUpvalue(self.compiler.?, idx, true);
+    }
 
     const upvalue = self.resolveUpvalue(enclosing, lexeme);
     if (upvalue) |idx| return self.addUpvalue(self.compiler.?, idx, false);
@@ -558,6 +566,7 @@ test "compiler init & parse simple expression" {
 const Local = struct {
     lexeme: []const u8,
     depth: ?u8,
+    is_captured: bool = false,
 };
 
 const Upvalue = struct {
