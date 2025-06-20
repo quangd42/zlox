@@ -31,3 +31,7 @@ pub fn main() !void {
         std.process.exit(64);
     }
 }
+
+test "all project tests" {
+    @import("std").testing.refAllDeclsRecursive(@This());
+}
