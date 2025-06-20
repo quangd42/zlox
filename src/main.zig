@@ -1,19 +1,19 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const dbg = @import("builtin").mode == .Debug;
-
 const Chunk = @import("chunk.zig").Chunk;
 const debug = @import("debug.zig");
 const vm = @import("vm.zig");
 const VM = vm.VM;
 
+const DEBUGGING = @import("builtin").mode == .Debug;
+
 pub fn main() !void {
-    var alloc_type = if (dbg) std.heap.DebugAllocator(.{}).init else std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var alloc_type = if (DEBUGGING) std.heap.DebugAllocator(.{}).init else std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = alloc_type.allocator();
     defer {
         const deinit_status = alloc_type.deinit();
-        if (dbg and deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAILED");
+        if (DEBUGGING and deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAILED");
     }
 
     var my_vm = VM.init(allocator);

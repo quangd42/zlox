@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 const print = std.debug.print;
 const testing = std.testing;
 
+const TRACE_EXECUTION = @import("debug").@"trace-execution";
+
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
 const OpCode = _chunk.OpCode;
@@ -19,7 +21,7 @@ const debug = @import("debug.zig");
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 
-const dbg = @import("builtin").mode == .Debug;
+const DEBUGGING = @import("builtin").mode == .Debug;
 
 scanner: Scanner,
 parser: Parser,
@@ -51,7 +53,7 @@ fn endCompiler(self: *Self) !*ObjFunction {
     try self.emitOpCode(.NIL); // Implicit nil return at the end of function
     try self.emitOpCode(.RETURN);
 
-    if (dbg and self.parser.had_error) {
+    if (TRACE_EXECUTION and self.parser.had_error) {
         const name = if (self.compiler.?.function.name) |str| str.chars else "<script>";
         debug.disassembleChunk(self.chunk(), name);
     }
@@ -711,7 +713,7 @@ fn binary(self: *Self, can_assign: bool) Allocator.Error!void {
         .LESS => self.emitOpCode(.LESS),
         .LESS_EQUAL => self.emitOpCode(.LESS_EQUAL),
         else => |tt| {
-            if (dbg) print("{}\n", .{tt});
+            if (DEBUGGING) print("{}\n", .{tt});
             unreachable;
         },
     };

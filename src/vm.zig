@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 const print = std.debug.print;
 const testing = std.testing;
 
+const TRACE_EXECUTION = @import("debug").@"trace-execution";
+
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
 const OpCode = _chunk.OpCode;
@@ -18,8 +20,6 @@ const Compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
 const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
-
-const dbg = @import("builtin").mode == .Debug;
 
 const FRAME_MAX = 64;
 const STACK_MAX = FRAME_MAX * std.math.maxInt(u8);
@@ -128,7 +128,7 @@ pub const VM = struct {
     fn run(self: *VM) !void {
         var frame = self.topFrame();
         while (frame.ip < frame.closure.function.chunk.code.items.len) {
-            if (dbg) {
+            if (TRACE_EXECUTION) {
                 print("          ", .{});
                 for (self.stack.items) |slot| {
                     print("[ {} ]", .{slot});
