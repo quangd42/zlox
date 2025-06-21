@@ -110,12 +110,12 @@ pub const Table = struct {
 };
 
 test "table ops" {
-    var vm = VM.init(testing.allocator);
+    var vm = try VM.init(testing.allocator);
     defer vm.deinit();
     var table = Table.init(testing.allocator);
     defer table.deinit();
-    const key1 = try ObjString.init(&vm, "key");
-    const key2 = try ObjString.init(&vm, "not");
+    const key1 = try ObjString.init(vm, "key");
+    const key2 = try ObjString.init(vm, "not");
     // get from empty table
     var got = table.get(key1);
     try testing.expectEqual(null, got);
@@ -145,12 +145,12 @@ test "table ops" {
 }
 
 test "rewrite key" {
-    var vm = VM.init(testing.allocator);
+    var vm = try VM.init(testing.allocator);
     defer vm.deinit();
-    const key1 = try ObjString.init(&vm, "hello world");
-    const key2 = try ObjString.init(&vm, "hello ");
-    const key3 = try ObjString.init(&vm, "world");
-    const key4 = try key2.concat(&vm, key3);
+    const key1 = try ObjString.init(vm, "hello world");
+    const key2 = try ObjString.init(vm, "hello ");
+    const key3 = try ObjString.init(vm, "world");
+    const key4 = try key2.concat(vm, key3);
     const current_count = vm.globals.count;
     var set = try vm.globals.set(key1, .{ .Number = 1 });
     try testing.expect(set);

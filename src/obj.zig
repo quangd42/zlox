@@ -177,30 +177,31 @@ pub const String = struct {
 };
 
 test "string interning" {
-    var vm = VM.init(testing.allocator);
+    var vm = try VM.init(testing.allocator);
     defer vm.deinit();
     const original_str = "hello world";
-    const a_str = try String.init(&vm, original_str);
-    const b_str = try String.init(&vm, "hello world");
+    const a_str = try String.init(vm, original_str);
+    const b_str = try String.init(vm, "hello world");
     try testing.expect(a_str == b_str);
 }
 
 test "concatenate strings" {
-    var vm = VM.init(testing.allocator);
-    // explicitly free table beause all strings are going
+    var vm = try VM.init(testing.allocator);
+    // explicitly free table and vm instance beause all strings are going
     // to be freed individually in this test
     defer vm.strings.deinit();
+    defer vm.allocator.destroy(vm);
     const original_str: []const u8 = "Hello ";
-    const a_str = try String.init(&vm, original_str);
-    const b_str = try String.init(&vm, "world!");
-    const out = try a_str.concat(&vm, b_str);
-    defer b_str.deinit(&vm);
-    defer out.deinit(&vm);
+    const a_str = try String.init(vm, original_str);
+    const b_str = try String.init(vm, "world!");
+    const out = try a_str.concat(vm, b_str);
+    defer b_str.deinit(vm);
+    defer out.deinit(vm);
     // Expect new string has all the right chars
     try testing.expectEqualSlices(u8, "Hello world!", out.chars);
     // Make sure that the "const" source string was not accidentally freed
     // when a_str is freed
-    a_str.deinit(&vm);
+    a_str.deinit(vm);
     try testing.expectEqualStrings("Hello ", original_str);
 }
 

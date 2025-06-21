@@ -552,9 +552,9 @@ pub const Compiler = struct {
 
 test "compiler init & parse simple expression" {
     const source = "print 1 + 275;";
-    var vm = @import("vm.zig").VM.init(testing.allocator);
+    var vm = try @import("vm.zig").VM.init(testing.allocator);
     defer vm.deinit();
-    var state = try Self.init(&vm, source);
+    var state = try Self.init(vm, source);
     const fun = try state.compile();
 
     try testing.expectEqual(null, fun.name);

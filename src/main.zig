@@ -16,7 +16,7 @@ pub fn main() !void {
         if (DEBUGGING and deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAILED");
     }
 
-    var my_vm = VM.init(allocator);
+    var my_vm = try VM.init(allocator);
     defer my_vm.deinit();
 
     const args = try std.process.argsAlloc(allocator);

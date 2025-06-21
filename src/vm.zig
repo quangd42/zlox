@@ -20,6 +20,7 @@ const Compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
 const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
+const GC = @import("memory.zig").GC;
 
 const FRAME_MAX = 64;
 const STACK_MAX = FRAME_MAX * std.math.maxInt(u8);
@@ -43,17 +44,25 @@ pub const VM = struct {
     open_upvalues: ?*ObjUpvalue = null,
     strings: Table,
     globals: Table,
+    gc: GC,
     allocator: Allocator,
 
-    pub fn init(allocator: Allocator) VM {
-        return VM{
-            .frames = std.ArrayList(CallFrame).init(allocator),
-            .stack = std.ArrayList(Value).init(allocator),
-            .strings = Table.init(allocator),
-            .globals = Table.init(allocator),
-            .allocator = allocator,
+    pub fn init(alloc: Allocator) !*VM {
+        var vm = try alloc.create(VM);
+        vm.* = .{
+            .gc = GC.init(alloc, vm),
+            .allocator = vm.gc.allocator(),
+            .globals = Table.init(vm.allocator),
+            .strings = Table.init(vm.allocator),
+            .open_upvalues = null,
+            .objects = null,
+            .chunk = undefined,
+            .stack = std.ArrayList(Value).init(vm.allocator),
+            .frames = std.ArrayList(CallFrame).init(vm.allocator),
         };
+        return vm;
     }
+
     pub fn deinit(vm: *VM) void {
         vm.strings.deinit();
         vm.globals.deinit();
@@ -65,6 +74,7 @@ pub const VM = struct {
             obj.deinit(vm);
             object = next;
         }
+        vm.allocator.destroy(vm);
     }
 
     pub fn repl(self: *VM) !void {
@@ -440,14 +450,14 @@ pub const VM = struct {
 };
 
 test "vm deinit" {
-    var vm = VM.init(testing.allocator);
+    var vm = try VM.init(testing.allocator);
     defer vm.deinit(); // Expect this to free all string allocations
     const String = @import("obj.zig").String;
 
     const original_str: []const u8 = "Hello ";
-    const a_str = try String.init(&vm, original_str);
-    const b_str = try String.init(&vm, "world!");
-    const out = try a_str.concat(&vm, b_str);
+    const a_str = try String.init(vm, original_str);
+    const b_str = try String.init(vm, "world!");
+    const out = try a_str.concat(vm, b_str);
     try testing.expectEqualSlices(u8, "Hello world!", out.chars);
 }
 
