@@ -2,6 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
+const LOG_GC = @import("debug").@"log-gc";
+
 const Chunk = @import("chunk.zig").Chunk;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
@@ -13,8 +15,11 @@ pub const Obj = struct {
     pub fn deinit(self: *Obj, vm: *VM) void {
         switch (self.type) {
             inline else => |t| {
-                const ObjVariant = t.VariantType();
-                const obj: *ObjVariant = @alignCast(@fieldParentPtr("obj", self));
+                const VT = t.VariantType();
+                const obj: *VT = @alignCast(@fieldParentPtr("obj", self));
+                if (LOG_GC) {
+                    std.debug.print("{*} free type {s}\n", .{ obj, @typeName(VT) });
+                }
                 obj.deinit(vm);
             },
         }
@@ -40,9 +45,13 @@ pub const Type = enum {
 };
 
 fn allocateObj(vm: *VM, comptime obj_type: Type) !*obj_type.VariantType() {
-    const out = try vm.allocator.create(obj_type.VariantType());
+    const VT = obj_type.VariantType();
+    const out = try vm.allocator.create(VT);
     out.obj = .{ .type = obj_type, .next = vm.objects };
     vm.objects = &out.obj;
+    if (LOG_GC) {
+        std.debug.print("{*} allocate {} for {s}\n", .{ &out.obj, @sizeOf(VT), @typeName(VT) });
+    }
     return out;
 }
 

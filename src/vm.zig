@@ -20,7 +20,7 @@ const Compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
 const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
-const GC = @import("memory.zig").GC;
+const GC = @import("gc.zig").GC;
 
 const FRAME_MAX = 64;
 const STACK_MAX = FRAME_MAX * std.math.maxInt(u8);

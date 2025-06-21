@@ -13,7 +13,8 @@ pub fn build(b: *std.Build) void {
     // To pass options from the build script and into the project’s Zig code, use the Options step.
     const debug_options = b.addOptions();
     debug_options.addOption(bool, "trace-execution", b.option(bool, "trace-execution", "Enable Trace Execution") orelse false);
-    debug_options.addOption(bool, "stress-gc", b.option(bool, "stress-gc", "Enable Stress Garbage Collection") orelse false);
+    debug_options.addOption(bool, "stress-gc", b.option(bool, "stress-gc", "Enable Stressing Garbage Collection") orelse false);
+    debug_options.addOption(bool, "log-gc", b.option(bool, "log-gc", "Enable Logging Garbage Collection") orelse false);
 
     // All executables using exe_mod will have these options
     exe_mod.addOptions("debug", debug_options);
