@@ -11,6 +11,7 @@ const VM = @import("vm.zig").VM;
 pub const Obj = struct {
     type: Type,
     next: ?*Obj = null,
+    is_marked: bool = false,
 
     pub fn deinit(self: *Obj, vm: *VM) void {
         switch (self.type) {
@@ -18,9 +19,20 @@ pub const Obj = struct {
                 const VT = t.VariantType();
                 const obj: *VT = @alignCast(@fieldParentPtr("obj", self));
                 if (LOG_GC) {
-                    std.debug.print("{*} free type {s}\n", .{ obj, @typeName(VT) });
+                    std.debug.print("{*} free type {s}\n", .{ self, @typeName(VT) });
                 }
                 obj.deinit(vm);
+            },
+        }
+    }
+
+    pub inline fn as(self: *Obj, obj_t: Type) ?*obj_t.VariantType() {
+        switch (self.type) {
+            inline else => |t| {
+                if (obj_t != t) return null;
+                const VT = t.VariantType();
+                const obj: *VT = @alignCast(@fieldParentPtr("obj", self));
+                return obj;
             },
         }
     }
@@ -44,10 +56,10 @@ pub const Type = enum {
     }
 };
 
-fn allocateObj(vm: *VM, comptime obj_type: Type) !*obj_type.VariantType() {
-    const VT = obj_type.VariantType();
+fn allocateObj(vm: *VM, comptime obj_t: Type) !*obj_t.VariantType() {
+    const VT = obj_t.VariantType();
     const out = try vm.allocator.create(VT);
-    out.obj = .{ .type = obj_type, .next = vm.objects };
+    out.obj = .{ .type = obj_t, .next = vm.objects };
     vm.objects = &out.obj;
     if (LOG_GC) {
         std.debug.print("{*} allocate {} for {s}\n", .{ &out.obj, @sizeOf(VT), @typeName(VT) });
@@ -70,10 +82,19 @@ pub const Function = struct {
     const Self = @This();
     pub fn init(vm: *VM) !*Self {
         const out = try allocateObj(vm, .Function);
-        out.arity = 0;
-        out.upvalue_count = 0;
-        out.chunk = try Chunk.init(vm.allocator);
-        out.name = null;
+        try vm.push(.{ .Obj = &out.obj });
+        defer _ = vm.pop();
+        out.* = .{
+            .obj = out.obj,
+            .arity = 0,
+            .upvalue_count = 0,
+            .chunk = Chunk.init(vm.allocator),
+            .name = null,
+        };
+        // out.arity = 0;
+        // out.upvalue_count = 0;
+        // out.chunk = Chunk.init(vm.allocator);
+        // out.name = null;
         return out;
     }
 
@@ -152,6 +173,8 @@ pub const String = struct {
 
     fn allocateString(vm: *VM, chars: []const u8, hash: u32) !*String {
         const out = try allocateObj(vm, .String);
+        try vm.push(.{ .Obj = &out.obj });
+        defer _ = vm.pop();
         out.hash = hash;
         out.chars = chars;
         _ = try vm.strings.set(out, .{ .Nil = {} });
@@ -196,10 +219,10 @@ test "string interning" {
 
 test "concatenate strings" {
     var vm = try VM.init(testing.allocator);
-    // explicitly free table and vm instance beause all strings are going
+    // explicitly set vm.objects = null because all strings are going
     // to be freed individually in this test
-    defer vm.strings.deinit();
-    defer vm.allocator.destroy(vm);
+    defer vm.deinit();
+    defer vm.objects = null;
     const original_str: []const u8 = "Hello ";
     const a_str = try String.init(vm, original_str);
     const b_str = try String.init(vm, "world!");

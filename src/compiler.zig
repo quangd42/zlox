@@ -44,9 +44,9 @@ fn initCompiler(self: *Self, compiler: *Compiler) !void {
     if (compiler.type != .Script) {
         compiler.function.name = try ObjString.init(self.vm, self.parser.previous.lexeme);
     }
-    try compiler.locals.append(.{ .depth = 0, .lexeme = "" });
     compiler.enclosing = self.compiler;
-    self.compiler = compiler;
+    self.compiler = compiler; // important to happen before any further allocation to keep compiler alive
+    try compiler.locals.append(.{ .depth = 0, .lexeme = "" });
 }
 
 fn endCompiler(self: *Self) !*ObjFunction {
@@ -221,6 +221,8 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
 
 fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
     const str_obj = try ObjString.init(self.vm, lexeme);
+    try self.vm.push(.{ .Obj = &str_obj.obj });
+    defer _ = self.vm.pop();
     return try self.chunk().addConstant(.{ .Obj = &str_obj.obj });
 }
 
@@ -743,7 +745,10 @@ fn string(self: *Self, can_assign: bool) Allocator.Error!void {
     _ = can_assign;
     const prev = &self.parser.previous;
     const str_obj = try ObjString.init(self.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
-    try self.emitConstant(.{ .Obj = &str_obj.obj });
+    const val: Value = .{ .Obj = &str_obj.obj };
+    try self.vm.push(val);
+    defer _ = self.vm.pop();
+    try self.emitConstant(val);
 }
 
 fn namedVariable(self: *Self, lexeme: []const u8, can_assign: bool) !void {

@@ -39,26 +39,30 @@ const CallFrame = struct {
 pub const VM = struct {
     frames: std.ArrayList(CallFrame),
     stack: std.ArrayList(Value),
-    chunk: *Chunk = undefined,
     objects: ?*Obj = null,
     open_upvalues: ?*ObjUpvalue = null,
     strings: Table,
     globals: Table,
+    compiler: ?Compiler,
+    grayStack: std.ArrayList(*Obj),
     gc: GC,
     allocator: Allocator,
 
-    pub fn init(alloc: Allocator) !*VM {
-        var vm = try alloc.create(VM);
+    pub fn init(backing_allocator: Allocator) !*VM {
+        var vm = try backing_allocator.create(VM);
         vm.* = .{
-            .gc = GC.init(alloc, vm),
+            .gc = GC.init(backing_allocator, vm),
             .allocator = vm.gc.allocator(),
+            .compiler = null,
             .globals = Table.init(vm.allocator),
             .strings = Table.init(vm.allocator),
             .open_upvalues = null,
             .objects = null,
-            .chunk = undefined,
-            .stack = std.ArrayList(Value).init(vm.allocator),
+            // pre allocate enough memory for the stack to avoid triggering gc
+            // when using the stack for keeping other objects connected
+            .stack = try std.ArrayList(Value).initCapacity(vm.allocator, 64),
             .frames = std.ArrayList(CallFrame).init(vm.allocator),
+            .grayStack = std.ArrayList(*Obj).init(backing_allocator),
         };
         return vm;
     }
@@ -68,13 +72,14 @@ pub const VM = struct {
         vm.globals.deinit();
         vm.stack.deinit();
         vm.frames.deinit();
+        vm.grayStack.deinit();
         var object = vm.objects;
         while (object) |obj| {
             const next = obj.next;
             obj.deinit(vm);
             object = next;
         }
-        vm.allocator.destroy(vm);
+        vm.gc.backing_allocator.destroy(vm);
     }
 
     pub fn repl(self: *VM) !void {
@@ -123,8 +128,8 @@ pub const VM = struct {
         self.defineNative("clock", clockNative) catch {
             @panic("failed to define native function.");
         };
-        var compiler = try Compiler.init(self, source);
-        const function = compiler.compile() catch return InterpretError.CompileError;
+        self.compiler = try Compiler.init(self, source);
+        const function = self.compiler.?.compile() catch return InterpretError.CompileError;
 
         try self.push(.{ .Obj = &function.obj });
         const closure = try ObjClosure.init(self, function);
@@ -319,11 +324,11 @@ pub const VM = struct {
         return self.stack.items[len - 1 - distance];
     }
 
-    fn pop(self: *VM) ?Value {
+    pub fn pop(self: *VM) ?Value {
         return self.stack.pop();
     }
 
-    fn push(self: *VM, val: Value) !void {
+    pub fn push(self: *VM, val: Value) !void {
         if (self.stack.items.len == STACK_MAX) return error.OutOfMemory;
         return self.stack.append(val);
     }
