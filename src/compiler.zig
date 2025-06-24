@@ -44,7 +44,7 @@ fn initCompiler(self: *Self, compiler: *Compiler) !void {
     if (compiler.type != .Script) {
         compiler.function.name = try ObjString.init(self.vm, self.parser.previous.lexeme);
     }
-    compiler.locals.appendAssumeCapacity(.{ .depth = 0, .lexeme = "" });
+    try compiler.locals.append(.{ .depth = 0, .lexeme = "" });
     compiler.enclosing = self.compiler;
     self.compiler = compiler;
 }
@@ -121,7 +121,7 @@ fn emitLoop(self: *Self, loop_start: usize) !void {
 }
 
 fn emitConstant(self: *Self, value: Value) !void {
-    const const_idx = self.chunk().addConstant(value);
+    const const_idx = try self.chunk().addConstant(value);
     try self.chunk().writeConstant(const_idx, self.parser.previous.line);
 }
 
@@ -221,12 +221,14 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
 
 fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
     const str_obj = try ObjString.init(self.vm, lexeme);
-    return self.chunk().addConstant(.{ .Obj = &str_obj.obj });
+    return try self.chunk().addConstant(.{ .Obj = &str_obj.obj });
 }
 
-fn addLocal(self: *Self, lexeme: []const u8) void {
+fn addLocal(self: *Self, lexeme: []const u8) !void {
     // depth = null to mark local as uninitialized
-    self.compiler.?.locals.appendAssumeCapacity(.{ .lexeme = lexeme, .depth = null });
+    var locals = self.compiler.?.locals;
+    if (locals.items.len >= U8_COUNT) return error.OutOfMemory;
+    try locals.append(.{ .lexeme = lexeme, .depth = null });
 }
 
 fn resolveLocal(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
@@ -275,7 +277,7 @@ fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
     return null;
 }
 
-fn declareVariable(self: *Self) void {
+fn declareVariable(self: *Self) !void {
     if (self.compiler.?.scope_depth == 0) return; // If global scope just skip
     var i = self.compiler.?.locals.items.len;
     while (i > 0) : (i -= 1) {
@@ -285,12 +287,12 @@ fn declareVariable(self: *Self) void {
             self.errorAtPrev("Variable with the this name exists in this scope.");
         }
     }
-    self.addLocal(self.parser.previous.lexeme);
+    try self.addLocal(self.parser.previous.lexeme);
 }
 
 fn parseVariable(self: *Self, err_msg: []const u8) !u8 {
     self.consume(.IDENTIFIER, err_msg);
-    self.declareVariable();
+    try self.declareVariable();
     if (self.compiler.?.scope_depth > 0) return 0;
     return makeIdentConstant(self, self.parser.previous.lexeme);
 }
@@ -505,7 +507,7 @@ fn function(self: *Self, fun_type: FunctionType) !void {
     }
     try self.block();
     const fun = try self.endCompiler();
-    const const_idx = self.chunk().addConstant(.{ .Obj = &fun.obj });
+    const const_idx = try self.chunk().addConstant(.{ .Obj = &fun.obj });
     try self.emitOpCode(.CLOSURE);
     try self.emitByte(const_idx);
 
@@ -523,22 +525,23 @@ fn funDeclaration(self: *Self) !void {
     try self.defineVariable(fun_name_idx);
 }
 
+const U8_COUNT = std.math.maxInt(u8) + 1;
+
 pub const Compiler = struct {
     enclosing: ?*Compiler = null,
 
     locals: std.ArrayList(Local),
     scope_depth: u8,
-    upvalues: [u8_max]Upvalue,
+    upvalues: [U8_COUNT]Upvalue,
 
     function: *ObjFunction,
     type: FunctionType,
 
-    const u8_max = std.math.maxInt(u8);
     pub fn init(vm: *VM, fun_type: FunctionType) !Compiler {
         return Compiler{
-            .locals = try std.ArrayList(Local).initCapacity(vm.allocator, u8_max),
+            .locals = std.ArrayList(Local).init(vm.allocator),
             .scope_depth = 0,
-            .upvalues = [_]Upvalue{.{ .index = 0, .is_local = false }} ** u8_max,
+            .upvalues = [_]Upvalue{.{ .index = 0, .is_local = false }} ** U8_COUNT,
             .function = try ObjFunction.init(vm),
             .type = fun_type,
         };

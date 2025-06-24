@@ -40,17 +40,17 @@ pub const OpCode = enum(u8) {
     RETURN,
 };
 
+const CONSTANT_MAX = std.math.maxInt(u8) + 1;
+
 pub const Chunk = struct {
     code: std.ArrayList(u8),
     constants: std.ArrayList(Value),
     lines: std.ArrayList(usize),
     allocator: Allocator,
 
-    pub fn init(allocator: Allocator) !Chunk {
+    pub fn init(allocator: Allocator) Chunk {
         return Chunk{
-            // Set max cap 256 and use appendAssumeCapacity to make sure
-            // no more memory is allocated
-            .constants = try std.ArrayList(Value).initCapacity(allocator, std.math.maxInt(u8) + 1),
+            .constants = std.ArrayList(Value).init(allocator),
             .code = std.ArrayList(u8).init(allocator),
             .lines = std.ArrayList(usize).init(allocator),
             .allocator = allocator,
@@ -72,8 +72,9 @@ pub const Chunk = struct {
         try self.writeByte(@intFromEnum(oc), line);
     }
 
-    pub fn addConstant(self: *Chunk, val: Value) u8 {
-        self.constants.appendAssumeCapacity(val);
+    pub fn addConstant(self: *Chunk, val: Value) !u8 {
+        if (self.constants.items.len >= CONSTANT_MAX) return error.OutOfMemory;
+        try self.constants.append(val);
         return @intCast(self.constants.items.len - 1);
     }
 
@@ -94,7 +95,7 @@ pub const Chunk = struct {
 };
 
 test "Chunk write byte and line tracking" {
-    var c = try Chunk.init(testing.allocator);
+    var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
     try c.writeByte(42, 123);
@@ -106,7 +107,7 @@ test "Chunk write byte and line tracking" {
 }
 
 test "Chunk write OpCode" {
-    var c = try Chunk.init(testing.allocator);
+    var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
     try c.writeOpCode(.RETURN, 456);
@@ -117,11 +118,11 @@ test "Chunk write OpCode" {
 }
 
 test "Chunk add constant" {
-    var c = try Chunk.init(testing.allocator);
+    var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
     const val: Value = .{ .Number = 3.14 };
-    const idx = c.addConstant(val);
+    const idx = try c.addConstant(val);
 
     try testing.expectEqual(0, idx);
     try testing.expectEqual(1, c.constants.items.len);
@@ -129,11 +130,11 @@ test "Chunk add constant" {
 }
 
 test "Chunk write constant - small index" {
-    var c = try Chunk.init(testing.allocator);
+    var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
     const val: Value = .{ .Number = 2.71 };
-    const idx = c.addConstant(val);
+    const idx = try c.addConstant(val);
     try c.writeConstant(idx, 789);
 
     // Should use OP_CONSTANT for small indexes
@@ -144,7 +145,7 @@ test "Chunk write constant - small index" {
 }
 
 test "Chunk get byte at valid offset" {
-    var c = try Chunk.init(testing.allocator);
+    var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
     try c.writeByte(55, 999);
@@ -154,13 +155,13 @@ test "Chunk get byte at valid offset" {
 }
 
 test "Chunk multiple operations sequence" {
-    var c = try Chunk.init(testing.allocator);
+    var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
     // Write a sequence of operations like you might in real code
     try c.writeOpCode(.RETURN, 1);
     const val: Value = .{ .Number = 42.0 };
-    try c.writeConstant(c.addConstant(val), 2);
+    try c.writeConstant(try c.addConstant(val), 2);
 
     // Verify the byte sequence
     try testing.expectEqual(3, c.code.items.len);
