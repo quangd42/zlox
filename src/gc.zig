@@ -11,6 +11,8 @@ const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 
+const HEAP_GROW_FACTOR = 2;
+
 pub const GC = struct {
     backing_allocator: Allocator,
     vm: *VM,
@@ -31,12 +33,16 @@ pub const GC = struct {
     fn alloc(ctx: *anyopaque, len: usize, alignment: mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self: *GC = @ptrCast(@alignCast(ctx));
         if (STRESS_GC) self.collectGarbage();
+        self.updateAllocation(len, 0);
+        if (self.vm.bytes_allocated > self.vm.next_gc) self.collectGarbage();
         return self.backing_allocator.rawAlloc(len, alignment, ret_addr);
     }
 
     fn resize(ctx: *anyopaque, buf: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
         const self: *GC = @ptrCast(@alignCast(ctx));
         if (new_len > buf.len and STRESS_GC) self.collectGarbage();
+        self.updateAllocation(new_len, buf.len);
+        if (self.vm.bytes_allocated > self.vm.next_gc) self.collectGarbage();
         return self.backing_allocator.rawResize(buf, alignment, new_len, ret_addr);
     }
 
@@ -49,23 +55,36 @@ pub const GC = struct {
     ) ?[*]u8 {
         const self: *GC = @ptrCast(@alignCast(ctx));
         if (new_len > buf.len and STRESS_GC) self.collectGarbage();
+        self.updateAllocation(new_len, buf.len);
+        if (self.vm.bytes_allocated > self.vm.next_gc) self.collectGarbage();
         return self.backing_allocator.rawRemap(buf, alignment, new_len, ret_addr);
     }
 
     fn free(ctx: *anyopaque, buf: []u8, alignment: mem.Alignment, ret_addr: usize) void {
         const self: *GC = @ptrCast(@alignCast(ctx));
+        self.updateAllocation(0, buf.len);
+        if (self.vm.bytes_allocated > self.vm.next_gc) self.collectGarbage();
         return self.backing_allocator.rawFree(buf, alignment, ret_addr);
     }
 
     fn collectGarbage(self: *GC) void {
         if (self.vm.compiler == null) return; // make sure vm is fully initialized before any collection
-        if (LOG_GC) print("-- gc begin\n", .{});
-        defer if (LOG_GC) print("-- gc end\n", .{});
+        var before: usize = 0;
+        if (LOG_GC) {
+            print("-- gc begin\n", .{});
+            before = self.vm.bytes_allocated;
+        }
+        defer if (LOG_GC) {
+            print("-- gc end\n", .{});
+            print("   collected {d} bytes (from {d} to {d}) next at {d}\n", .{ before - self.vm.bytes_allocated, before, self.vm.bytes_allocated, self.vm.next_gc });
+        };
 
         self.markRoots() catch @panic("failed to allocate memory for gc");
         self.traceReferences() catch @panic("failed to allocate memory for gc");
         tableRemoveWhite(&self.vm.strings);
         self.sweep();
+
+        self.vm.next_gc = self.vm.bytes_allocated * HEAP_GROW_FACTOR;
     }
 
     fn markRoots(self: *GC) !void {
@@ -174,6 +193,18 @@ pub const GC = struct {
         var cur_compiler = compiler.compiler;
         while (cur_compiler) |cur| : (cur_compiler = cur.enclosing) {
             try self.markObj(&cur.function.obj);
+        }
+    }
+
+    fn updateAllocation(self: *GC, new_size: usize, old_size: usize) void {
+        if (new_size > old_size) {
+            self.vm.bytes_allocated += (new_size - old_size);
+        } else if (old_size > new_size) {
+            if (self.vm.bytes_allocated < (old_size - new_size)) {
+                self.vm.bytes_allocated = 0;
+                return;
+            }
+            self.vm.bytes_allocated -= (old_size - new_size);
         }
     }
 };

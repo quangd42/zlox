@@ -45,6 +45,8 @@ pub const VM = struct {
     globals: Table,
     compiler: ?Compiler,
     grayStack: std.ArrayList(*Obj),
+    bytes_allocated: usize = 0,
+    next_gc: usize = 1024 * 1024,
     gc: GC,
     allocator: Allocator,
 
