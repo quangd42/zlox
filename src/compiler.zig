@@ -216,6 +216,9 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
             return;
         };
         try infixFn(self, can_assign);
+        if (can_assign and self.match(.EQUAL)) {
+            self.errorAtPrev("Invalid assignment target.");
+        }
     }
 }
 
@@ -227,9 +230,9 @@ fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
 }
 
 fn addLocal(self: *Self, lexeme: []const u8) !void {
-    // depth = null to mark local as uninitialized
-    var locals = self.compiler.?.locals;
+    const locals = &self.compiler.?.locals;
     if (locals.items.len >= U8_COUNT) return error.OutOfMemory;
+    // depth = null to mark local as uninitialized
     try locals.append(.{ .lexeme = lexeme, .depth = null });
 }
 
@@ -280,11 +283,12 @@ fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
 }
 
 fn declareVariable(self: *Self) !void {
-    if (self.compiler.?.scope_depth == 0) return; // If global scope just skip
-    var i = self.compiler.?.locals.items.len;
+    const current = self.compiler.?;
+    if (current.scope_depth == 0) return; // If global scope just skip
+    var i = current.locals.items.len;
     while (i > 0) : (i -= 1) {
-        const local = self.compiler.?.locals.items[i - 1];
-        if (local.depth == null or local.depth.? < self.compiler.?.scope_depth) break;
+        const local = current.locals.items[i - 1];
+        if (local.depth == null or local.depth.? < current.scope_depth) break;
         if (std.mem.eql(u8, self.parser.previous.lexeme, local.lexeme)) {
             self.errorAtPrev("Variable with the this name exists in this scope.");
         }
@@ -364,8 +368,10 @@ fn statement(self: *Self) Allocator.Error!void {
     const tok = self.parser.current;
     switch (tok.type) {
         .PRINT => try self.printStatement(),
+        .FOR => try self.forStatement(),
         .IF => try self.ifStatement(),
         .RETURN => try self.returnStatement(),
+        .WHILE => try self.whileStatement(),
         .LEFT_BRACE => {
             self.beginScope();
             try self.block();
@@ -471,7 +477,7 @@ fn forStatement(self: *Self) !void {
 
 fn expressionStatement(self: *Self) !void {
     try self.expression();
-    self.consume(.SEMICOLON, "Expect ';' after value.");
+    self.consume(.SEMICOLON, "Expect ';' after expression.");
     try self.emitOpCode(.POP);
 }
 
@@ -629,8 +635,8 @@ const Rules = ParseRuleArray.init(.{
     // One or two character tokens.
     .BANG = .{ .prefix = unary },
     .BANG_EQUAL = .{ .infix = binary, .precedence = .EQUALITY },
-    .EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
-    .EQUAL_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
+    .EQUAL = .{},
+    .EQUAL_EQUAL = .{ .infix = binary, .precedence = .EQUALITY },
     .GREATER = .{ .infix = binary, .precedence = .COMPARISON },
     .GREATER_EQUAL = .{ .infix = binary, .precedence = .COMPARISON },
     .LESS = .{ .infix = binary, .precedence = .COMPARISON },

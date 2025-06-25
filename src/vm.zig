@@ -444,13 +444,11 @@ pub const VM = struct {
         if (self.frames.items.len == FRAME_MAX) {
             return self.runtimeError("Stack overflow.\n", .{});
         }
-        // zig fmt: off
         try self.frames.append(.{
             .closure = closure,
             .ip = 0,
             .start = self.stack.items.len - arg_count - 1,
         });
-        // zig fmt: on
     }
 };
 
