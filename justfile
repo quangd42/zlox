@@ -12,11 +12,8 @@ test:
     zig build test --summary new
 
 # export TEST_FILES to shell such as
-# fish: (fd --glob "*.lox" test/call  \
-#     | grep -v test/benchmark \
-#     | grep -v test/scanning \
-#     | grep -v test/expressions \
-#     | grep -v test/for/closure_in_body.lox)
+# fish: set -x TEST_FILES (fd -t f -e lox . test/)
+# test/.fdignore will filter out unwanted tests
 
 test-all: build
     sudo zig run test/test.zig -- zig-out/bin/zlox $TEST_FILES

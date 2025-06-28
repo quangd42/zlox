@@ -25,10 +25,7 @@ const GC = @import("gc.zig").GC;
 const FRAME_MAX = 64;
 const STACK_MAX = FRAME_MAX * std.math.maxInt(u8);
 
-pub const InterpretError = error{
-    CompileError,
-    RuntimeError,
-} || Allocator.Error;
+pub const InterpretError = error{ CompileError, RuntimeError } || Allocator.Error;
 
 const CallFrame = struct {
     closure: *ObjClosure,
@@ -201,7 +198,7 @@ pub const VM = struct {
                         try self.binaryOp(.ADD);
                     } else if (rhs.isObj(.String) and lhs.isObj(.String)) {
                         try self.concatenate();
-                    } else return self.runtimeError("Operands must be strings or numbers.\n", .{});
+                    } else return self.runtimeError("Operands must be two numbers or two strings.\n", .{});
                 },
                 .SUBTRACT => try self.binaryOp(.SUBTRACT),
                 .MULTIPLY => try self.binaryOp(.MULTIPLY),
@@ -358,8 +355,8 @@ pub const VM = struct {
     }
 
     fn binaryOp(self: *VM, comptime op: OpCode) !void {
-        const b = self.pop().?.as(.Number) orelse return self.runtimeError("Operand must be numbers.\n", .{});
-        const a = self.pop().?.as(.Number) orelse return self.runtimeError("Operand must be numbers.\n", .{});
+        const b = self.pop().?.as(.Number) orelse return self.runtimeError("Operands must be numbers.\n", .{});
+        const a = self.pop().?.as(.Number) orelse return self.runtimeError("Operands must be numbers.\n", .{});
 
         try self.push(switch (op) {
             .ADD => .{ .Number = a + b },
@@ -440,7 +437,7 @@ pub const VM = struct {
 
     fn call(self: *VM, closure: *ObjClosure, arg_count: u8) !void {
         if (arg_count != closure.function.arity) {
-            return self.runtimeError("Expect {d} arguments but got {d}.\n", .{ closure.function.arity, arg_count });
+            return self.runtimeError("Expected {d} arguments but got {d}.\n", .{ closure.function.arity, arg_count });
         }
 
         if (self.frames.items.len == FRAME_MAX) {

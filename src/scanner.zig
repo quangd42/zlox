@@ -120,10 +120,10 @@ pub const Scanner = struct {
     }
 
     fn makeStringToken(s: *Scanner) Token {
-        while (s.peek() != '"') {
+        while (true) : (s.current += 1) {
             if (s.isAtEnd()) return s.errorToken("Unterminated string.");
             if (s.peek() == '\n') s.line += 1;
-            s.current += 1;
+            if (s.peek() == '"') break;
         }
         s.current += 1; // consume closing '"'
         return s.makeToken(.STRING);

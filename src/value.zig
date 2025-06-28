@@ -70,7 +70,7 @@ pub const Value = union(Type) {
                 switch (obj.type) {
                     inline else => |t| {
                         const obj_a = self.asObj(t).?;
-                        const obj_b = self.asObj(t).?;
+                        const obj_b = other.asObj(t).?;
                         return obj_a.eql(obj_b);
                     },
                 }

@@ -91,10 +91,6 @@ pub const Function = struct {
             .chunk = Chunk.init(vm.allocator),
             .name = null,
         };
-        // out.arity = 0;
-        // out.upvalue_count = 0;
-        // out.chunk = Chunk.init(vm.allocator);
-        // out.name = null;
         return out;
     }
 

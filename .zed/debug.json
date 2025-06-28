@@ -16,12 +16,12 @@
     }
   },
   {
-    "label": "Fun arguments",
+    "label": "Limit",
     "adapter": "CodeLLDB",
     "program": "./zig-out/bin/zlox",
     "request": "launch",
     "cwd": "$ZED_WORKTREE_ROOT",
-    "args": ["test/function/parameters_s.lox"],
+    "args": ["test/limit/too_many_upvalues.lox"],
     "build": {
       "command": "zig",
       "args": ["build", "-Dtrace-execution"]

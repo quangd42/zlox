@@ -84,14 +84,15 @@ fn beginScope(self: *Self) void {
 fn endScope(self: *Self) !void {
     const scope_depth = &self.compiler.?.scope_depth;
     scope_depth.* -= 1;
-    var locals = self.compiler.?.locals;
-    while (locals.items.len > 0 and locals.getLast().depth.? > scope_depth.*) {
-        if (locals.getLast().is_captured) {
+    const locals = &self.compiler.?.locals;
+    while (true) : (_ = locals.pop()) {
+        const stack_top = locals.getLastOrNull() orelse break;
+        if (stack_top.depth.? <= scope_depth.*) break;
+        if (stack_top.is_captured) {
             try self.emitOpCode(.CLOSE_UPVALUE);
         } else {
             try self.emitOpCode(.POP);
         }
-        _ = locals.pop();
     }
 }
 
@@ -113,15 +114,16 @@ fn emitJump(self: *Self, instr: OpCode) !usize {
 fn emitLoop(self: *Self, loop_start: usize) !void {
     try self.emitOpCode(.LOOP);
     const distance = self.chunk().code.items.len - loop_start + 2;
-    if (distance > std.math.maxInt(u16)) {
-        self.errorAtPrev("Loop body too large.");
-    }
+    if (distance > std.math.maxInt(u16))
+        return self.errorAtPrev("Loop body too large.");
     try self.emitByte(@intCast(distance >> 8 & 0xff));
     try self.emitByte(@intCast(distance & 0xff));
 }
 
 fn emitConstant(self: *Self, value: Value) !void {
-    const const_idx = try self.chunk().addConstant(value);
+    const const_idx = self.chunk().addConstant(value) catch {
+        return self.errorAtPrev("Too many constants in one chunk.");
+    };
     try self.chunk().writeConstant(const_idx, self.parser.previous.line);
 }
 
@@ -130,9 +132,8 @@ fn patchJump(self: *Self, offset: usize) void {
     // -2 to account for the offset bytes itself
     const distance = self.chunk().code.items.len - offset - 2;
 
-    if (distance > std.math.maxInt(u16)) {
-        self.errorAtPrev("Too much code to jump over.");
-    }
+    if (distance > std.math.maxInt(u16))
+        return self.errorAtPrev("Too much code to jump over.");
 
     self.chunk().code.items[offset] = @as(u8, @intCast(distance >> 8)) & 0xff;
     self.chunk().code.items[offset + 1] = @as(u8, @intCast(distance)) & 0xff;
@@ -149,10 +150,8 @@ fn advance(self: *Self) void {
 }
 
 fn consume(self: *Self, expected: TokenType, message: []const u8) void {
-    if (!self.check(expected)) {
-        self.errorAtCurrent(message);
-        return;
-    }
+    if (!self.check(expected)) return self.errorAtCurrent(message);
+
     self.advance();
 }
 
@@ -203,8 +202,7 @@ fn synchronize(self: *Self) void {
 fn parsePrecedence(self: *Self, precedence: Precedence) !void {
     self.advance();
     const prefixFn = Rules.get(self.parser.previous.type).prefix orelse {
-        self.errorAtPrev("Expect expression.");
-        return;
+        return self.errorAtPrev("Expect expression.");
     };
     const can_assign = precedence.isLessEql(.ASSIGNMENT);
     try prefixFn(self, can_assign);
@@ -212,12 +210,11 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
     while (precedence.isLessEql(Rules.get(self.parser.current.type).precedence)) {
         self.advance();
         const infixFn = Rules.get(self.parser.previous.type).infix orelse {
-            self.errorAtPrev("Expect infix operator.");
-            return;
+            return self.errorAtPrev("Expect infix operator.");
         };
         try infixFn(self, can_assign);
         if (can_assign and self.match(.EQUAL)) {
-            self.errorAtPrev("Invalid assignment target.");
+            return self.errorAtPrev("Invalid assignment target.");
         }
     }
 }
@@ -231,7 +228,8 @@ fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
 
 fn addLocal(self: *Self, lexeme: []const u8) !void {
     const locals = &self.compiler.?.locals;
-    if (locals.items.len >= U8_COUNT) return error.OutOfMemory;
+    if (locals.items.len >= U8_COUNT)
+        return self.errorAtPrev("Too many local variables in function.");
     // depth = null to mark local as uninitialized
     try locals.append(.{ .lexeme = lexeme, .depth = null });
 }
@@ -241,10 +239,11 @@ fn resolveLocal(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
     while (i > 0) : (i -= 1) {
         const local = compiler.locals.items[i - 1];
         if (std.mem.eql(u8, local.lexeme, lexeme)) {
-            if (local.depth == null) {
+            const depth = local.depth orelse {
                 self.errorAtPrev("Can't read local variable in its own initializer.");
-            }
-            return @intCast(i - 1);
+                return null;
+            };
+            if (depth <= compiler.scope_depth) return @intCast(i - 1);
         }
     }
     return null;
@@ -258,7 +257,7 @@ fn addUpvalue(self: *Self, compiler: *Compiler, index: u8, is_local: bool) u8 {
     }
 
     if (upvalue_count.* == std.math.maxInt(u8)) {
-        self.errorAtPrev("Too many closure variable in function.");
+        self.errorAtPrev("Too many closure variables in function.");
         return 0;
     }
 
@@ -290,7 +289,7 @@ fn declareVariable(self: *Self) !void {
         const local = current.locals.items[i - 1];
         if (local.depth == null or local.depth.? < current.scope_depth) break;
         if (std.mem.eql(u8, self.parser.previous.lexeme, local.lexeme)) {
-            self.errorAtPrev("Variable with the this name exists in this scope.");
+            return self.errorAtPrev("Variable with the this name exists in this scope.");
         }
     }
     try self.addLocal(self.parser.previous.lexeme);
@@ -384,7 +383,7 @@ fn statement(self: *Self) Allocator.Error!void {
 fn returnStatement(self: *Self) !void {
     self.advance(); // RETURN
     if (self.compiler.?.type == .Script) {
-        self.errorAtPrev("Can't return from top-level code.");
+        return self.errorAtPrev("Can't return from top-level code.");
     }
     if (self.match(.SEMICOLON)) {
         try self.emitOpCode(.NIL);
@@ -509,10 +508,8 @@ fn function(self: *Self, fun_type: FunctionType) !void {
         } else break;
     }
     self.consume(.RIGHT_PAREN, "Expect ')' after parameters.");
-    if (!self.check(.LEFT_BRACE)) {
+    if (!self.check(.LEFT_BRACE))
         self.errorAtCurrent("Expect '{' before function body.");
-        return;
-    }
     try self.block();
     const fun = try self.endCompiler();
     const const_idx = try self.chunk().addConstant(.{ .Obj = &fun.obj });
