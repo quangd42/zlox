@@ -152,25 +152,27 @@ pub const GC = struct {
     fn blackenObj(self: *GC, obj: *Obj) !void {
         if (LOG_GC) print("{*} blacken {}\n", .{ obj, Value{ .Obj = obj } });
         switch (obj.type) {
-            inline .Native, .String => {},
-            inline .Upvalue => |t| try self.markValue(&obj.as(t).?.closed),
-            inline .Function => |t| {
-                const function = obj.as(t).?;
+            .Native, .String => {},
+            .Upvalue => try self.markValue(&obj.as(.Upvalue).?.closed),
+            .Function => {
+                const function = obj.as(.Function).?;
                 if (function.name) |str| try self.markObj(&str.obj);
                 for (function.chunk.constants.items) |*value| {
                     try self.markValue(value);
                 }
             },
-            inline .Closure => |t| {
-                const closure = obj.as(t).?;
+            .Closure => {
+                const closure = obj.as(.Closure).?;
                 try self.markObj(&closure.function.obj);
                 for (closure.upvalues.items) |upvalue| {
                     try self.markObj(&upvalue.obj);
                 }
             },
-            inline .Class => |t| {
-                const class = obj.as(t).?;
-                try self.markObj(&class.name.obj);
+            .Class => try self.markObj(&obj.as(.Class).?.name.obj),
+            .Instance => {
+                const instance = obj.as(.Instance).?;
+                try self.markObj(&instance.class.obj);
+                try self.markTable(&instance.fields);
             },
         }
     }

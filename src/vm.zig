@@ -17,6 +17,7 @@ const ObjNative = _obj.Native;
 const ObjClass = _obj.Class;
 const NativeFn = _obj.NativeFn;
 const ObjUpvalue = _obj.Upvalue;
+const ObjInstance = _obj.Instance;
 const Compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
 const GC = @import("gc.zig").GC;
@@ -26,7 +27,7 @@ const Value = @import("value.zig").Value;
 const FRAME_MAX = 64;
 const STACK_MAX = FRAME_MAX * std.math.maxInt(u8);
 
-pub const InterpretError = error{ CompileError, RuntimeError } || Allocator.Error;
+pub const Error = error{ CompileError, RuntimeError, OutOfMemory };
 
 const CallFrame = struct {
     closure: *ObjClosure,
@@ -117,9 +118,9 @@ pub const VM = struct {
         defer self.allocator.free(source);
 
         self.interpret(source) catch |err| switch (err) {
-            InterpretError.CompileError => exit(65),
-            InterpretError.RuntimeError => exit(70),
-            InterpretError.OutOfMemory => exit(70),
+            Error.CompileError => exit(65),
+            Error.RuntimeError => exit(70),
+            Error.OutOfMemory => exit(70),
         };
         exit(0);
     }
@@ -129,7 +130,7 @@ pub const VM = struct {
             @panic("failed to define native function.");
         };
         self.compiler = try Compiler.init(self, source);
-        const function = self.compiler.?.compile() catch return InterpretError.CompileError;
+        const function = self.compiler.?.compile() catch return Error.CompileError;
 
         try self.push(.{ .Obj = &function.obj });
         const closure = try ObjClosure.init(self, function);
@@ -187,6 +188,30 @@ pub const VM = struct {
                     const slot = self.readByte();
                     frame.closure.upvalues.items[slot].location[0] = self.peek(0).?;
                 },
+                .GET_PROPERTY => {
+                    const maybe_instance = self.peek(0).?;
+                    const instance = maybe_instance.asObj(.Instance) orelse {
+                        return self.runtimeError("Only instances have properties.\n", .{});
+                    };
+                    const name = self.readString();
+                    const value = instance.fields.get(name) orelse {
+                        return self.runtimeError("Undefined property '{s}'.\n", .{name});
+                    };
+                    _ = self.pop(); // instance
+                    try self.push(value);
+                },
+                .SET_PROPERTY => {
+                    const value = self.peek(0).?;
+                    const maybe_instance = self.peek(1).?;
+                    const instance = maybe_instance.asObj(.Instance) orelse {
+                        return self.runtimeError("Only instances have fields.\n", .{});
+                    };
+                    const name = self.readString();
+                    _ = try instance.fields.set(name, value);
+                    _ = self.pop(); // value
+                    _ = self.pop(); // instance
+                    try self.push(value); // push value back
+                },
                 .EQUAL => try self.equalOp(),
                 .GREATER => try self.binaryOp(.GREATER),
                 .GREATER_EQUAL => try self.binaryOp(.GREATER_EQUAL),
@@ -207,7 +232,7 @@ pub const VM = struct {
                 .NOT => try self.push(.{ .Bool = self.pop().?.isFalsey() }),
                 .NEGATE => try self.negateOp(),
                 .PRINT => std.io.getStdOut().writer().print("{?}\n", .{self.pop()}) catch {
-                    return InterpretError.RuntimeError;
+                    return Error.RuntimeError;
                 },
                 .JUMP => {
                     const offset = self.readShort();
@@ -285,7 +310,7 @@ pub const VM = struct {
             }
         }
         self.resetState();
-        return InterpretError.RuntimeError;
+        return Error.RuntimeError;
     }
 
     fn defineNative(self: *VM, name: []const u8, function: NativeFn) !void {
@@ -381,8 +406,8 @@ pub const VM = struct {
         const a = self.pop().?;
         std.debug.assert(b.isObj(.String));
         std.debug.assert(a.isObj(.String));
-        const b_str = b.asObj(.String) orelse return InterpretError.RuntimeError;
-        const a_str = a.asObj(.String) orelse return InterpretError.RuntimeError;
+        const b_str = b.asObj(.String) orelse return Error.RuntimeError;
+        const a_str = a.asObj(.String) orelse return Error.RuntimeError;
         const out = try a_str.concat(self, b_str);
         try self.push(.{ .Obj = &out.obj });
     }
@@ -395,17 +420,23 @@ pub const VM = struct {
 
     fn callValue(self: *VM, callee: Value, arg_count: u8) !void {
         if (callee.is(.Obj)) {
-            switch (callee.Obj.type) {
-                .Closure => return self.call(callee.asObj(.Closure).?, arg_count),
-                .Native => return {
+            return switch (callee.Obj.type) {
+                .Class => {
+                    const class = callee.asObj(.Class).?;
+                    const instance: *ObjInstance = try .init(self, class);
+                    const callee_idx = self.stack.items.len - arg_count - 1; // index of the callee Value on the stack
+                    self.stack.items[callee_idx] = .{ .Obj = &instance.obj };
+                },
+                .Closure => self.call(callee.asObj(.Closure).?, arg_count),
+                .Native => {
                     const native = callee.asObj(.Native).?.function;
-                    const val_start_idx = self.stack.items.len - arg_count;
-                    const result = native(arg_count, self.stack.items.ptr + val_start_idx);
-                    self.stack.shrinkRetainingCapacity(val_start_idx - 1);
+                    const first_arg_idx = self.stack.items.len - arg_count; // index of the first arg Value on the stack
+                    const result = native(arg_count, self.stack.items.ptr + first_arg_idx);
+                    self.stack.shrinkRetainingCapacity(first_arg_idx - 1);
                     try self.push(result);
                 },
-                else => {},
-            }
+                else => self.runtimeError("Can only call functions and classes.\n", .{}),
+            };
         }
         return self.runtimeError("Can only call functions and classes.\n", .{});
     }

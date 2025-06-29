@@ -23,6 +23,8 @@ const VM = @import("vm.zig").VM;
 
 const DEBUGGING = @import("builtin").mode == .Debug;
 
+const Error = error{OutOfMemory};
+
 scanner: Scanner,
 parser: Parser,
 compiler: ?*Compiler,
@@ -207,6 +209,9 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
     const can_assign = precedence.isLessEql(.ASSIGNMENT);
     try prefixFn(self, can_assign);
 
+    // Can't assign to target parsed with prefixFn
+    if (self.check(.EQUAL)) return self.errorAtCurrent("Invalid assignment target.");
+
     while (precedence.isLessEql(Rules.get(self.parser.current.type).precedence)) {
         self.advance();
         const infixFn = Rules.get(self.parser.previous.type).infix orelse {
@@ -367,7 +372,7 @@ fn varDeclaration(self: *Self) !void {
     try self.defineVariable(global_idx);
 }
 
-fn statement(self: *Self) Allocator.Error!void {
+fn statement(self: *Self) Error!void {
     const tok = self.parser.current;
     switch (tok.type) {
         .PRINT => try self.printStatement(),
@@ -484,7 +489,7 @@ fn expressionStatement(self: *Self) !void {
     try self.emitOpCode(.POP);
 }
 
-fn block(self: *Self) Allocator.Error!void {
+fn block(self: *Self) Error!void {
     self.advance(); // LEFT_BRACE
     while (!self.check(.RIGHT_BRACE) and !self.check(.EOF)) {
         try self.declaration();
@@ -627,7 +632,7 @@ const Precedence = enum {
     }
 };
 
-const ParseFn = *const fn (*Self, bool) Allocator.Error!void;
+const ParseFn = *const fn (*Self, bool) Error!void;
 const ParseRule = struct {
     infix: ?ParseFn = null,
     prefix: ?ParseFn = null,
@@ -641,7 +646,7 @@ const Rules = ParseRuleArray.init(.{
     .LEFT_BRACE = .{},
     .RIGHT_BRACE = .{},
     .COMMA = .{},
-    .DOT = .{},
+    .DOT = .{ .infix = dot, .precedence = .CALL },
     .MINUS = .{ .prefix = unary, .infix = binary, .precedence = .TERM },
     .PLUS = .{ .infix = binary, .precedence = .TERM },
     .SEMICOLON = .{},
@@ -691,7 +696,7 @@ test "test parse rule table" {
 
 // Parse Fns: expressions
 
-fn number(self: *Self, can_assign: bool) Allocator.Error!void {
+fn number(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const val = std.fmt.parseFloat(f64, self.parser.previous.lexeme) catch |err| {
         print("{any}: ", .{err});
@@ -700,13 +705,13 @@ fn number(self: *Self, can_assign: bool) Allocator.Error!void {
     try self.emitConstant(.{ .Number = val });
 }
 
-fn grouping(self: *Self, can_assign: bool) Allocator.Error!void {
+fn grouping(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     try self.expression();
     self.consume(.RIGHT_PAREN, "Expect ')' after expression.");
 }
 
-fn unary(self: *Self, can_assign: bool) Allocator.Error!void {
+fn unary(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const operator_type = self.parser.previous.type;
     try self.parsePrecedence(.UNARY);
@@ -718,7 +723,7 @@ fn unary(self: *Self, can_assign: bool) Allocator.Error!void {
     };
 }
 
-fn binary(self: *Self, can_assign: bool) Allocator.Error!void {
+fn binary(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const operator_type = self.parser.previous.type;
     const target_prec_int = @intFromEnum(Rules.get(operator_type).precedence) + 1;
@@ -745,14 +750,27 @@ fn binary(self: *Self, can_assign: bool) Allocator.Error!void {
     };
 }
 
-fn call(self: *Self, can_assign: bool) Allocator.Error!void {
+fn call(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const arg_count = try self.argumentList();
     try self.emitOpCode(.CALL);
     try self.emitByte(arg_count);
 }
 
-fn literal(self: *Self, can_assign: bool) Allocator.Error!void {
+fn dot(self: *Self, can_assign: bool) Error!void {
+    self.consume(.IDENTIFIER, "Expect property name after '.'.");
+    const field_name_idx = try self.makeIdentConstant(self.parser.previous.lexeme);
+
+    if (can_assign and self.match(.EQUAL)) {
+        try self.expression();
+        try self.emitOpCode(.SET_PROPERTY);
+    } else {
+        try self.emitOpCode(.GET_PROPERTY);
+    }
+    try self.emitByte(field_name_idx);
+}
+
+fn literal(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     try switch (self.parser.previous.type) {
         .FALSE => self.emitOpCode(.FALSE),
@@ -762,7 +780,7 @@ fn literal(self: *Self, can_assign: bool) Allocator.Error!void {
     };
 }
 
-fn string(self: *Self, can_assign: bool) Allocator.Error!void {
+fn string(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const prev = &self.parser.previous;
     const str_obj = try ObjString.init(self.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
@@ -798,18 +816,18 @@ fn namedVariable(self: *Self, lexeme: []const u8, can_assign: bool) !void {
 }
 
 // prefix parseFn for variable
-fn variable(self: *Self, can_assign: bool) Allocator.Error!void {
+fn variable(self: *Self, can_assign: bool) Error!void {
     try namedVariable(self, self.parser.previous.lexeme, can_assign);
 }
 
-fn and_(self: *Self, can_assign: bool) Allocator.Error!void {
+fn and_(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const skip_rhs_loc = try self.emitJump(.JUMP_IF_FALSE);
     try self.emitOpCode(.POP);
     try self.parsePrecedence(.AND);
     self.patchJump(skip_rhs_loc);
 }
-fn or_(self: *Self, can_assign: bool) Allocator.Error!void {
+fn or_(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const skip_rhs_loc = try self.emitJump(.JUMP_IF_TRUE);
     try self.emitOpCode(.POP);

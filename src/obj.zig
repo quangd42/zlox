@@ -5,6 +5,7 @@ const testing = std.testing;
 const LOG_GC = @import("debug").@"log-gc";
 
 const Chunk = @import("chunk.zig").Chunk;
+const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 
@@ -42,15 +43,17 @@ pub const Type = enum {
     Class,
     Closure,
     Function,
+    Instance,
     Native,
     String,
     Upvalue,
 
-    pub fn VariantType(comptime self: @This()) type {
+    pub fn VariantType(self: Type) type {
         return switch (self) {
             .Class => Class,
             .Closure => Closure,
             .Function => Function,
+            .Instance => Instance,
             .Native => Native,
             .String => String,
             .Upvalue => Upvalue,
@@ -358,3 +361,40 @@ test "init class" {
     defer testing.allocator.free(printed_name);
     try testing.expectEqualStrings("klass", printed_name);
 }
+
+pub const Instance = struct {
+    obj: Obj,
+    class: *Class,
+    fields: Table,
+
+    const Self = @This();
+
+    pub fn init(vm: *VM, class: *Class) !*Self {
+        const out = try allocateObj(vm, .Instance);
+        out.* = .{
+            .obj = out.obj,
+            .class = class,
+            .fields = .init(vm.allocator),
+        };
+        return out;
+    }
+
+    pub fn deinit(self: *Self, vm: *VM) void {
+        // .class will be collected by gc
+        self.fields.deinit();
+        vm.allocator.destroy(self);
+    }
+
+    pub fn eql(self: *Self, other: *Self) bool {
+        return self == other;
+    }
+
+    pub fn format(
+        self: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("{s} instance", .{self.class.name.chars});
+    }
+};
