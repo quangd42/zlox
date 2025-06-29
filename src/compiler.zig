@@ -40,7 +40,7 @@ pub fn init(vm: *VM, source: []const u8) !Self {
     return self;
 }
 
-fn initCompiler(self: *Self, compiler: *Compiler) !void {
+fn setupCompiler(self: *Self, compiler: *Compiler) !void {
     if (compiler.type != .Script) {
         compiler.function.name = try ObjString.init(self.vm, self.parser.previous.lexeme);
     }
@@ -65,7 +65,7 @@ fn endCompiler(self: *Self) !*ObjFunction {
 
 pub fn compile(self: *Self) !*ObjFunction {
     var compiler = try Compiler.init(self.vm, .Script);
-    try self.initCompiler(&compiler);
+    try self.setupCompiler(&compiler);
     while (!self.match(.EOF)) try self.declaration();
     self.consume(.EOF, "Expect end of statement.");
     const fun = try self.endCompiler();
@@ -283,7 +283,9 @@ fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
 
 fn declareVariable(self: *Self) !void {
     const current = self.compiler.?;
-    if (current.scope_depth == 0) return; // If global scope just skip
+    // If we're at global scope, no work to do
+    if (current.scope_depth == 0) return;
+    // Look in current scope if variable with the same name is already declared
     var i = current.locals.items.len;
     while (i > 0) : (i -= 1) {
         const local = current.locals.items[i - 1];
@@ -292,6 +294,7 @@ fn declareVariable(self: *Self) !void {
             return self.errorAtPrev("Variable with the this name exists in this scope.");
         }
     }
+    // Add it to local stack
     try self.addLocal(self.parser.previous.lexeme);
 }
 
@@ -299,7 +302,7 @@ fn parseVariable(self: *Self, err_msg: []const u8) !u8 {
     self.consume(.IDENTIFIER, err_msg);
     try self.declareVariable();
     if (self.compiler.?.scope_depth > 0) return 0;
-    return makeIdentConstant(self, self.parser.previous.lexeme);
+    return self.makeIdentConstant(self.parser.previous.lexeme);
 }
 
 fn markInitialized(self: *Self) void {
@@ -341,6 +344,7 @@ fn expression(self: *Self) !void {
 fn declaration(self: *Self) !void {
     const tok = self.parser.current;
     switch (tok.type) {
+        .CLASS => try self.classDeclaration(),
         .FUN => try self.funDeclaration(),
         .VAR => try self.varDeclaration(),
         .IF => try self.ifStatement(),
@@ -490,7 +494,7 @@ fn block(self: *Self) Allocator.Error!void {
 
 fn function(self: *Self, fun_type: FunctionType) !void {
     var compiler = try Compiler.init(self.vm, fun_type);
-    try self.initCompiler(&compiler);
+    try self.setupCompiler(&compiler);
     self.beginScope();
 
     self.consume(.LEFT_PAREN, "Expect '(' after function name.");
@@ -528,6 +532,20 @@ fn funDeclaration(self: *Self) !void {
     self.markInitialized();
     try self.function(.Function);
     try self.defineVariable(fun_name_idx);
+}
+
+fn classDeclaration(self: *Self) !void {
+    self.advance(); // CLASS
+    self.consume(.IDENTIFIER, "Expect class name.");
+    const class_name_idx = try self.makeIdentConstant(self.parser.previous.lexeme);
+    try self.declareVariable();
+
+    try self.emitOpCode(.CLASS);
+    try self.emitByte(class_name_idx);
+    try self.defineVariable(class_name_idx);
+
+    self.consume(.LEFT_BRACE, "Expect '{' before class body.");
+    self.consume(.RIGHT_BRACE, "Expect '}' after class body.");
 }
 
 const U8_COUNT = std.math.maxInt(u8) + 1;

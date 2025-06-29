@@ -168,6 +168,10 @@ pub const GC = struct {
                     try self.markObj(&upvalue.obj);
                 }
             },
+            inline .Class => |t| {
+                const class = obj.as(t).?;
+                try self.markObj(&class.name.obj);
+            },
         }
     }
 

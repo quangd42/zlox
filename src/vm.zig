@@ -14,13 +14,14 @@ const ObjString = _obj.String;
 const ObjFunction = _obj.Function;
 const ObjClosure = _obj.Closure;
 const ObjNative = _obj.Native;
+const ObjClass = _obj.Class;
 const NativeFn = _obj.NativeFn;
 const ObjUpvalue = _obj.Upvalue;
 const Compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
+const GC = @import("gc.zig").GC;
 const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
-const GC = @import("gc.zig").GC;
 
 const FRAME_MAX = 64;
 const STACK_MAX = FRAME_MAX * std.math.maxInt(u8);
@@ -260,6 +261,10 @@ pub const VM = struct {
                     self.stack.shrinkRetainingCapacity(frame.start);
                     try self.push(result);
                     frame = self.topFrame();
+                },
+                .CLASS => {
+                    const class = try ObjClass.init(self, self.readString());
+                    try self.push(.{ .Obj = &class.obj });
                 },
             }
         }

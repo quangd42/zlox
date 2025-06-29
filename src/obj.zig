@@ -39,6 +39,7 @@ pub const Obj = struct {
 };
 
 pub const Type = enum {
+    Class,
     Closure,
     Function,
     Native,
@@ -47,6 +48,7 @@ pub const Type = enum {
 
     pub fn VariantType(comptime self: @This()) type {
         return switch (self) {
+            .Class => Class,
             .Closure => Closure,
             .Function => Function,
             .Native => Native,
@@ -313,3 +315,46 @@ pub const Closure = struct {
         try writer.print("{}", .{self.function});
     }
 };
+
+pub const Class = struct {
+    obj: Obj,
+    name: *String,
+
+    const Self = @This();
+
+    pub fn init(vm: *VM, name: *String) !*Self {
+        const out = try allocateObj(vm, .Class);
+        out.name = name;
+        return out;
+    }
+
+    pub fn deinit(self: *Self, vm: *VM) void {
+        // .name will be collected by gc
+        vm.allocator.destroy(self);
+    }
+
+    pub fn eql(self: *Self, other: *Self) bool {
+        return self == other;
+    }
+
+    pub fn format(
+        self: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("{s}", .{self.name.chars});
+    }
+};
+
+test "init class" {
+    var vm = try VM.init(std.testing.allocator);
+    defer vm.deinit();
+
+    const name = try String.init(vm, "klass");
+    const klass = try Class.init(vm, name);
+
+    const printed_name = try std.fmt.allocPrint(testing.allocator, "{}", .{klass});
+    defer testing.allocator.free(printed_name);
+    try testing.expectEqualStrings("klass", printed_name);
+}
