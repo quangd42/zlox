@@ -139,7 +139,7 @@ fn emitConstant(self: *Self, value: Value) !void {
     const const_idx = self.chunk().addConstant(value) catch {
         return self.err("Too many constants in one chunk.");
     };
-    try self.chunk().writeConstant(const_idx, self.parser.previous.line);
+    try self.chunk().writeConst(const_idx, self.parser.previous.line);
 }
 
 fn patchJump(self: *Self, offset: usize) void {
@@ -805,10 +805,16 @@ fn dot(self: *Self, can_assign: bool) Error!void {
     if (can_assign and self.match(.EQUAL)) {
         try self.expression();
         try self.emitOpCode(.SET_PROPERTY);
+        try self.emitByte(field_name_idx);
+    } else if (self.match(.LEFT_PAREN)) {
+        const arg_count = try self.argumentList();
+        try self.emitOpCode(.INVOKE);
+        try self.emitByte(field_name_idx);
+        try self.emitByte(arg_count);
     } else {
         try self.emitOpCode(.GET_PROPERTY);
+        try self.emitByte(field_name_idx);
     }
-    try self.emitByte(field_name_idx);
 }
 
 fn literal(self: *Self, can_assign: bool) Error!void {

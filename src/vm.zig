@@ -253,6 +253,12 @@ pub const VM = struct {
                     try self.callValue(self.peek(arg_count), arg_count);
                     frame = self.topFrame();
                 },
+                .INVOKE => {
+                    const method = self.readString();
+                    const arg_count = self.readByte();
+                    try self.invoke(method, arg_count);
+                    frame = self.topFrame();
+                },
                 .CLOSURE => {
                     const function = self.readConstant().asObj(.Function).?;
                     const closure = try Obj.Closure.init(self, function);
@@ -295,8 +301,7 @@ pub const VM = struct {
     }
 
     fn runtimeError(self: *VM, comptime fmt: []const u8, args: anytype) !void {
-        print(fmt, args);
-        print("\n", .{});
+        print(fmt ++ "\n", args);
         var i = self.frames.items.len;
         while (i > 0) : (i -= 1) {
             const frame = self.frames.items[i - 1];
@@ -316,13 +321,13 @@ pub const VM = struct {
     inline fn readByte(self: *VM) u8 {
         const frame = self.topFrame();
         frame.ip += 1;
-        return frame.closure.function.chunk.getByteAt(frame.ip - 1) catch unreachable;
+        return frame.closure.function.chunk.byteAt(frame.ip - 1) catch unreachable;
     }
 
     inline fn readConstant(self: *VM) Value {
         const frame = &self.frames.getLast();
         const constant_idx = self.readByte();
-        return frame.closure.function.chunk.getConstantAt(constant_idx) catch unreachable;
+        return frame.closure.function.chunk.constAt(constant_idx) catch unreachable;
     }
 
     inline fn readShort(self: *VM) u16 {
@@ -463,6 +468,25 @@ pub const VM = struct {
             },
             else => self.runtimeError("Can only call functions and classes.", .{}),
         };
+    }
+
+    fn invoke(self: *VM, name: *Obj.String, arg_count: u8) !void {
+        const receiver = self.peek(arg_count);
+        const instance = receiver.asObj(.Instance) orelse
+            return self.runtimeError("Only instances have methods.", .{});
+        const maybe_value = instance.fields.get(name);
+        if (maybe_value) |value| {
+            const callee_idx = self.stack.items.len - arg_count - 1;
+            self.stack.items[callee_idx] = value;
+            return self.callValue(value, arg_count);
+        }
+        try self.invokeFromClass(instance.class, name, arg_count);
+    }
+
+    fn invokeFromClass(self: *VM, class: *Obj.Class, name: *Obj.String, arg_count: u8) !void {
+        const method = class.methods.get(name) orelse
+            return self.runtimeError("Undefined property '{s}'.", .{name.chars});
+        return self.call(method.asObj(.Closure).?, arg_count);
     }
 
     fn captureUpvalue(self: *VM, local: [*]Value) !*Obj.Upvalue {

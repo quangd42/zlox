@@ -37,6 +37,7 @@ pub const OpCode = enum(u8) {
     JUMP_IF_FALSE,
     LOOP,
     CALL,
+    INVOKE,
     CLOSURE,
     CLOSE_UPVALUE,
     RETURN,
@@ -82,17 +83,17 @@ pub const Chunk = struct {
         return @intCast(self.constants.items.len - 1);
     }
 
-    pub fn writeConstant(self: *Chunk, constant_idx: u8, line: usize) !void {
+    pub fn writeConst(self: *Chunk, constant_idx: u8, line: usize) !void {
         try self.writeOpCode(.CONSTANT, line);
         try self.writeByte(constant_idx, line);
     }
 
-    pub fn getByteAt(self: *Chunk, offset: usize) !u8 {
+    pub fn byteAt(self: *Chunk, offset: usize) !u8 {
         if (offset > self.code.items.len) return error.OutOfBounds;
         return self.code.items[offset];
     }
 
-    pub fn getConstantAt(self: *Chunk, offset: u8) !Value {
+    pub fn constAt(self: *Chunk, offset: u8) !Value {
         if (offset > self.constants.items.len) return error.OutOfBounds;
         return self.constants.items[offset];
     }
@@ -139,7 +140,7 @@ test "Chunk write constant - small index" {
 
     const val: Value = .{ .Number = 2.71 };
     const idx = try c.addConstant(val);
-    try c.writeConstant(idx, 789);
+    try c.writeConst(idx, 789);
 
     // Should use OP_CONSTANT for small indexes
     try testing.expectEqual(2, c.code.items.len);
@@ -153,7 +154,7 @@ test "Chunk get byte at valid offset" {
     defer c.deinit();
 
     try c.writeByte(55, 999);
-    const byte = c.getByteAt(0);
+    const byte = c.byteAt(0);
 
     try testing.expectEqual(55, byte);
 }
@@ -165,7 +166,7 @@ test "Chunk multiple operations sequence" {
     // Write a sequence of operations like you might in real code
     try c.writeOpCode(.RETURN, 1);
     const val: Value = .{ .Number = 42.0 };
-    try c.writeConstant(try c.addConstant(val), 2);
+    try c.writeConst(try c.addConstant(val), 2);
 
     // Verify the byte sequence
     try testing.expectEqual(3, c.code.items.len);
