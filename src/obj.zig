@@ -9,35 +9,28 @@ const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 
-pub const Obj = struct {
-    type: Type,
-    next: ?*Obj = null,
-    is_marked: bool = false,
+const Obj = @This();
+type: Type,
+next: ?*Obj = null,
+is_marked: bool = false,
 
-    pub fn deinit(self: *Obj, vm: *VM) void {
-        switch (self.type) {
-            inline else => |t| {
-                const VT = t.VariantType();
-                const obj: *VT = @alignCast(@fieldParentPtr("obj", self));
-                if (LOG_GC) {
-                    std.debug.print("{*} free type {s}\n", .{ self, @typeName(VT) });
-                }
-                obj.deinit(vm);
-            },
-        }
+pub fn deinit(obj: *Obj, vm: *VM) void {
+    switch (obj.type) {
+        inline else => |t| {
+            const obj_variant = obj.as(t);
+            if (LOG_GC) {
+                std.debug.print("{*} free type {s}\n", .{ obj, @typeName(t.VariantType()) });
+            }
+            obj_variant.deinit(vm);
+        },
     }
+}
 
-    pub inline fn as(self: *Obj, obj_t: Type) ?*obj_t.VariantType() {
-        switch (self.type) {
-            inline else => |t| {
-                if (obj_t != t) return null;
-                const VT = t.VariantType();
-                const obj: *VT = @alignCast(@fieldParentPtr("obj", self));
-                return obj;
-            },
-        }
-    }
-};
+/// Meant to be used together with a switch on obj.type
+pub fn as(obj: *Obj, comptime obj_t: Type) *obj_t.VariantType() {
+    std.debug.assert(obj.type == obj_t);
+    return @alignCast(@fieldParentPtr("obj", obj));
+}
 
 pub const Type = enum {
     Class,

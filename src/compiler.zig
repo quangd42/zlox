@@ -8,11 +8,8 @@ const TRACE_EXECUTION = @import("debug").@"trace-execution";
 const _chunk = @import("chunk.zig");
 const Chunk = _chunk.Chunk;
 const OpCode = _chunk.OpCode;
-const _obj = @import("obj.zig");
-const Obj = _obj.Obj;
-const ObjString = _obj.String;
-const ObjFunction = _obj.Function;
-const FunctionType = _obj.FunctionType;
+const Obj = @import("obj.zig");
+const FunctionType = Obj.FunctionType;
 const _scanner = @import("scanner.zig");
 const Scanner = _scanner.Scanner;
 const Token = _scanner.Token;
@@ -44,14 +41,14 @@ pub fn init(vm: *VM, source: []const u8) !Self {
 
 fn setupCompiler(self: *Self, compiler: *Compiler) !void {
     if (compiler.type != .Script) {
-        compiler.function.name = try ObjString.init(self.vm, self.parser.previous.lexeme);
+        compiler.function.name = try Obj.String.init(self.vm, self.parser.previous.lexeme);
     }
     compiler.enclosing = self.compiler;
     self.compiler = compiler; // important to happen before any further allocation to keep compiler alive
     try compiler.locals.append(.{ .depth = 0, .lexeme = "" });
 }
 
-fn endCompiler(self: *Self) !*ObjFunction {
+fn endCompiler(self: *Self) !*Obj.Function {
     try self.emitOpCode(.NIL); // Implicit nil return at the end of function
     try self.emitOpCode(.RETURN);
 
@@ -65,7 +62,7 @@ fn endCompiler(self: *Self) !*ObjFunction {
     return compiler.function;
 }
 
-pub fn compile(self: *Self) !*ObjFunction {
+pub fn compile(self: *Self) !*Obj.Function {
     var compiler = try Compiler.init(self.vm, .Script);
     try self.setupCompiler(&compiler);
     while (!self.match(.EOF)) try self.declaration();
@@ -209,23 +206,23 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
     const can_assign = precedence.isLessEql(.ASSIGNMENT);
     try prefixFn(self, can_assign);
 
-    // Can't assign to target parsed with prefixFn
-    if (self.check(.EQUAL)) return self.errorAtCurrent("Invalid assignment target.");
-
     while (precedence.isLessEql(Rules.get(self.parser.current.type).precedence)) {
         self.advance();
         const infixFn = Rules.get(self.parser.previous.type).infix orelse {
             return self.errorAtPrev("Expect infix operator.");
         };
         try infixFn(self, can_assign);
-        if (can_assign and self.match(.EQUAL)) {
-            return self.errorAtPrev("Invalid assignment target.");
-        }
+    }
+
+    // At this point EQUAL should have been consumed already by valid parseFn
+    // so the target must be invalid
+    if (can_assign and self.match(.EQUAL)) {
+        return self.errorAtPrev("Invalid assignment target.");
     }
 }
 
 fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
-    const str_obj = try ObjString.init(self.vm, lexeme);
+    const str_obj = try Obj.String.init(self.vm, lexeme);
     try self.vm.push(.{ .Obj = &str_obj.obj });
     defer _ = self.vm.pop();
     return try self.chunk().addConstant(.{ .Obj = &str_obj.obj });
@@ -562,7 +559,7 @@ pub const Compiler = struct {
     scope_depth: u8,
     upvalues: [U8_COUNT]Upvalue,
 
-    function: *ObjFunction,
+    function: *Obj.Function,
     type: FunctionType,
 
     pub fn init(vm: *VM, fun_type: FunctionType) !Compiler {
@@ -570,7 +567,7 @@ pub const Compiler = struct {
             .locals = std.ArrayList(Local).init(vm.allocator),
             .scope_depth = 0,
             .upvalues = [_]Upvalue{.{ .index = 0, .is_local = false }} ** U8_COUNT,
-            .function = try ObjFunction.init(vm),
+            .function = try Obj.Function.init(vm),
             .type = fun_type,
         };
     }
@@ -783,7 +780,7 @@ fn literal(self: *Self, can_assign: bool) Error!void {
 fn string(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const prev = &self.parser.previous;
-    const str_obj = try ObjString.init(self.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
+    const str_obj = try Obj.String.init(self.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
     const val: Value = .{ .Obj = &str_obj.obj };
     try self.vm.push(val);
     defer _ = self.vm.pop();

@@ -6,7 +6,7 @@ const Allocator = mem.Allocator;
 const LOG_GC = @import("debug").@"log-gc";
 const STRESS_GC = @import("debug").@"stress-gc";
 
-const Obj = @import("obj.zig").Obj;
+const Obj = @import("obj.zig");
 const Table = @import("table.zig").Table;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
@@ -108,7 +108,7 @@ pub const GC = struct {
     }
 
     fn traceReferences(self: *GC) !void {
-        while (self.vm.grayStack.pop()) |obj| {
+        while (self.vm.gray_stack.pop()) |obj| {
             try self.blackenObj(obj);
         }
     }
@@ -139,7 +139,7 @@ pub const GC = struct {
         if (obj.is_marked) return;
         if (LOG_GC) print("{*} mark {}\n", .{ obj, Value{ .Obj = obj } });
         obj.is_marked = true;
-        try self.vm.grayStack.append(obj);
+        try self.vm.gray_stack.append(obj);
     }
 
     fn markValue(self: *GC, value: *Value) !void {
@@ -153,26 +153,35 @@ pub const GC = struct {
         if (LOG_GC) print("{*} blacken {}\n", .{ obj, Value{ .Obj = obj } });
         switch (obj.type) {
             .Native, .String => {},
-            .Upvalue => try self.markValue(&obj.as(.Upvalue).?.closed),
+            .Upvalue => try self.markValue(&obj.as(.Upvalue).closed),
             .Function => {
-                const function = obj.as(.Function).?;
+                const function = obj.as(.Function);
                 if (function.name) |str| try self.markObj(&str.obj);
                 for (function.chunk.constants.items) |*value| {
                     try self.markValue(value);
                 }
             },
             .Closure => {
-                const closure = obj.as(.Closure).?;
+                const closure = obj.as(.Closure);
                 try self.markObj(&closure.function.obj);
                 for (closure.upvalues.items) |upvalue| {
                     try self.markObj(&upvalue.obj);
                 }
             },
-            .Class => try self.markObj(&obj.as(.Class).?.name.obj),
+            .Class => {
+                const class = obj.as(.Class);
+                try self.markObj(&class.name.obj);
+                try self.markTable(&class.methods);
+            },
             .Instance => {
-                const instance = obj.as(.Instance).?;
+                const instance = obj.as(.Instance);
                 try self.markObj(&instance.class.obj);
                 try self.markTable(&instance.fields);
+            },
+            .BoundMethod => {
+                const bound = obj.as(.BoundMethod);
+                try self.markValue(&bound.receiver);
+                try self.markObj(&bound.method.obj);
             },
         }
     }

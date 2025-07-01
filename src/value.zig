@@ -1,9 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const _obj = @import("obj.zig");
-const Obj = _obj.Obj;
-const ObjType = _obj.Type;
+const Obj = @import("obj.zig");
 
 pub const Type = enum {
     Bool,
@@ -30,49 +28,40 @@ pub const Value = union(Type) {
             .Number => |val| try writer.print("{d}", .{val}),
             .Obj => |obj| {
                 switch (obj.type) {
-                    inline else => |obj_t| try writer.print("{?}", .{self.asObj(obj_t)}),
+                    inline else => |obj_t| try writer.print("{}", .{obj.as(obj_t)}),
                 }
             },
         }
     }
 
-    pub inline fn is(self: Value, val_t: Type) bool {
+    pub fn is(self: Value, val_t: Type) bool {
         return switch (self) {
             inline else => |_, tag| tag == val_t,
         };
     }
 
-    pub inline fn isObj(self: Value, obj_t: ObjType) bool {
+    pub fn isObj(self: Value, obj_t: Obj.Type) bool {
         return switch (self) {
             .Obj => |obj| obj.type == obj_t,
             else => false,
         };
     }
 
-    pub inline fn as(self: Value, comptime val_t: Type) ?@FieldType(Value, @tagName(val_t)) {
-        return switch (self) {
-            .Obj => null,
-            inline else => |_, tag| if (tag == val_t) @field(self, @tagName((val_t))) else null,
-        };
+    pub fn as(self: Value, comptime val_t: Type) ?@FieldType(Value, @tagName(val_t)) {
+        if (!self.is(val_t)) return null;
+        return @field(self, @tagName(val_t));
     }
 
-    pub inline fn asObj(self: Value, obj_t: ObjType) ?*obj_t.VariantType() {
-        return switch (self) {
-            .Obj => |obj| if (obj.type == obj_t) @alignCast(@fieldParentPtr("obj", obj)) else null,
-            else => null,
-        };
+    pub fn asObj(self: Value, comptime obj_t: Obj.Type) ?*obj_t.VariantType() {
+        if (!self.isObj(obj_t)) return null;
+        return self.Obj.as(obj_t);
     }
 
     pub fn eql(self: Value, other: Value) bool {
         switch (self) {
             .Obj => |obj| {
-                if (!other.isObj(obj.type)) return false;
                 switch (obj.type) {
-                    inline else => |t| {
-                        const obj_a = self.asObj(t).?;
-                        const obj_b = other.asObj(t).?;
-                        return obj_a.eql(obj_b);
-                    },
+                    inline else => |t| return other.isObj(t) and self.Obj.as(t).eql(other.Obj.as(t)),
                 }
             },
             inline else => |value, tag| {
@@ -81,7 +70,7 @@ pub const Value = union(Type) {
         }
     }
 
-    pub inline fn isFalsey(self: Value) bool {
+    pub fn isFalsey(self: Value) bool {
         return switch (self) {
             .Nil => true,
             .Bool => |b| !b,
@@ -117,9 +106,9 @@ test "Value methods" {
 
     var vm = try @import("vm.zig").VM.init(testing.allocator);
     defer vm.deinit();
-    const str_obj1 = try _obj.String.init(vm, "hello world");
-    const str_obj2 = try _obj.String.init(vm, "hello ");
-    const str_obj3 = try _obj.String.init(vm, "world");
+    const str_obj1 = try Obj.String.init(vm, "hello world");
+    const str_obj2 = try Obj.String.init(vm, "hello ");
+    const str_obj3 = try Obj.String.init(vm, "world");
     const str_obj4 = try str_obj2.concat(vm, str_obj3);
     const str1 = Value{ .Obj = @ptrCast(str_obj1) };
     const str2 = Value{ .Obj = &str_obj4.obj };
