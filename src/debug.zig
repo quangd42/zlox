@@ -46,11 +46,10 @@ pub fn disassembleInstruction(c: *Chunk, offset: usize) usize {
             idx += 1;
             print("{s:-<16} {d:4} {}\n", .{ @tagName(oc), const_idx, const_val });
             const fun = const_val.asObj(.Function).?;
-            var j: u8 = 0;
-            while (j < fun.upvalue_count) : (j += 1) {
+            for (0..fun.upvalue_count) |_| {
                 const is_local = c.byteAt(idx + 1) == 1;
                 const index = c.byteAt(idx + 2);
-                print("{d:4}      |                     {s} {d}\n", .{
+                print("{d:4}      |                     {s:<7} {d}\n", .{
                     idx,
                     if (is_local) "local" else "upvalue",
                     index,

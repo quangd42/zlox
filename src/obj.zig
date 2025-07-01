@@ -173,8 +173,11 @@ pub const String = struct {
         const out = try allocateObj(vm, .String);
         try vm.push(.{ .Obj = &out.obj });
         defer _ = vm.pop();
-        out.hash = hash;
-        out.chars = chars;
+        out.* = .{
+            .obj = out.obj,
+            .hash = hash,
+            .chars = chars,
+        };
         _ = try vm.strings.set(out, .{ .Nil = {} });
         return out;
     }
@@ -251,8 +254,11 @@ pub const Upvalue = struct {
 
     pub fn init(vm: *VM, slot: [*]Value) !*Self {
         const out = try allocateObj(vm, .Upvalue);
-        out.location = slot;
-        out.closed = Value.Nil;
+        out.* = .{
+            .obj = out.obj,
+            .location = slot,
+            .closed = Value.Nil,
+        };
         return out;
     }
 
@@ -277,19 +283,24 @@ pub const Upvalue = struct {
 pub const Closure = struct {
     obj: Obj,
     function: *Function,
-    upvalues: std.ArrayList(*Upvalue),
+    upvalues: []?*Upvalue,
 
     const Self = @This();
 
     pub fn init(vm: *VM, function: *Function) !*Self {
         const out = try allocateObj(vm, .Closure);
-        out.function = function;
-        out.upvalues = try std.ArrayList(*Upvalue).initCapacity(vm.allocator, function.upvalue_count);
+        const upvalues = try vm.allocator.alloc(?*Upvalue, function.upvalue_count);
+        for (upvalues) |*upvalue| upvalue.* = null;
+        out.* = .{
+            .obj = out.obj,
+            .function = function,
+            .upvalues = upvalues,
+        };
         return out;
     }
 
     pub fn deinit(self: *Self, vm: *VM) void {
-        self.upvalues.deinit();
+        vm.allocator.free(self.upvalues);
         vm.allocator.destroy(self);
     }
 

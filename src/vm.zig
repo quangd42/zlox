@@ -155,8 +155,8 @@ pub const VM = struct {
                 .TRUE => try self.push(.{ .Bool = true }),
                 .FALSE => try self.push(.{ .Bool = false }),
                 .POP => _ = self.pop(),
-                .GET_LOCAL => try self.push(self.frameSlotAt(frame, self.readByte()).*),
-                .SET_LOCAL => self.frameSlotAt(frame, self.readByte()).* = self.peek(0),
+                .GET_LOCAL => try self.push(self.frameSlot(frame, self.readByte())[0]),
+                .SET_LOCAL => self.frameSlot(frame, self.readByte())[0] = self.peek(0),
                 .GET_GLOBAL => {
                     const name = self.readString();
                     const val = self.globals.get(name) orelse {
@@ -178,11 +178,11 @@ pub const VM = struct {
                 },
                 .GET_UPVALUE => {
                     const slot = self.readByte();
-                    try self.push(frame.closure.upvalues.items[slot].location[0]);
+                    try self.push(frame.closure.upvalues[slot].?.location[0]);
                 },
                 .SET_UPVALUE => {
                     const slot = self.readByte();
-                    frame.closure.upvalues.items[slot].location[0] = self.peek(0);
+                    frame.closure.upvalues[slot].?.location[0] = self.peek(0);
                 },
                 .GET_PROPERTY => {
                     const maybe_instance = self.peek(0);
@@ -276,23 +276,23 @@ pub const VM = struct {
                     const closure = try Obj.Closure.init(self, function);
                     try self.push(.{ .Obj = &closure.obj });
                     // closure.upvalues was inited with the correct amount of upvalue slots
-                    for (0..closure.upvalues.capacity) |_| {
+                    for (closure.upvalues) |*upvalue| {
                         const is_local = self.readByte();
                         const index = self.readByte();
                         if (is_local == 1) {
-                            closure.upvalues.appendAssumeCapacity(try self.captureUpvalue(self.stack.items.ptr + frame.start + index));
+                            upvalue.* = try self.captureUpvalue(self.frameSlot(frame, index));
                         } else {
-                            closure.upvalues.appendAssumeCapacity(frame.closure.upvalues.items[index]);
+                            upvalue.* = frame.closure.upvalues[index];
                         }
                     }
                 },
                 .CLOSE_UPVALUE => {
-                    self.closeUpvalues(self.stack.items.ptr + self.stack.items.len - 1);
+                    self.closeUpvalues(self.frameSlot(frame, -1));
                     _ = self.pop();
                 },
                 .RETURN => {
                     const result = self.pop();
-                    self.closeUpvalues(self.stack.items.ptr + frame.start);
+                    self.closeUpvalues(self.frameSlot(frame, 0));
                     _ = self.frames.pop();
                     if (self.frames.items.len == 0) {
                         _ = self.pop();
@@ -385,8 +385,14 @@ pub const VM = struct {
         return &self.frames.items[self.frames.items.len - 1];
     }
 
-    inline fn frameSlotAt(self: *VM, frame: *CallFrame, slot: u8) *Value {
-        return &self.stack.items[frame.start + slot];
+    /// returns Value at slot_idx relative to the current call frame
+    /// if slot_idx < 0, wraps
+    inline fn frameSlot(self: *VM, current_frame: *CallFrame, slot_idx: i16) [*]Value {
+        const offset: usize = if (slot_idx < 0)
+            self.stack.items.len - @as(usize, @intCast(-1 * slot_idx))
+        else
+            @as(usize, @intCast(slot_idx));
+        return self.stack.items.ptr + current_frame.start + offset;
     }
 
     fn negateOp(self: *VM) !void {
@@ -399,8 +405,10 @@ pub const VM = struct {
     }
 
     fn binaryOp(self: *VM, comptime op: OpCode) !void {
-        const b = self.pop().as(.Number) orelse return self.runtimeError("Operands must be numbers.", .{});
-        const a = self.pop().as(.Number) orelse return self.runtimeError("Operands must be numbers.", .{});
+        const b = self.pop().as(.Number) orelse
+            return self.runtimeError("Operands must be numbers.", .{});
+        const a = self.pop().as(.Number) orelse
+            return self.runtimeError("Operands must be numbers.", .{});
 
         try self.push(switch (op) {
             .ADD => .{ .Number = a + b },
@@ -510,18 +518,18 @@ pub const VM = struct {
 
     fn captureUpvalue(self: *VM, local: [*]Value) !*Obj.Upvalue {
         var prev: ?*Obj.Upvalue = null;
-        var cur: ?*Obj.Upvalue = self.open_upvalues;
-        while (cur) |value| {
+        var curr: ?*Obj.Upvalue = self.open_upvalues;
+        while (curr) |value| {
             if (value.location - local > 0) {
                 prev = value;
-                cur = value.next;
+                curr = value.next;
                 continue;
             }
             if (value.location == local) return value;
             break;
         }
         var createdUpvalue = try Obj.Upvalue.init(self, local);
-        createdUpvalue.next = cur;
+        createdUpvalue.next = curr;
         if (prev) |p| {
             p.next = createdUpvalue;
         } else {

@@ -167,7 +167,8 @@ pub const GC = struct {
             .Closure => {
                 const closure = obj.as(.Closure);
                 try self.markObj(&closure.function.obj);
-                for (closure.upvalues.items) |upvalue| {
+                for (closure.upvalues) |mb_upvalue| {
+                    const upvalue = mb_upvalue orelse continue;
                     try self.markObj(&upvalue.obj);
                 }
             },

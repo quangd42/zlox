@@ -268,19 +268,19 @@ fn resolveLocal(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
 }
 
 fn addUpvalue(self: *Self, compiler: *Compiler, index: u8, is_local: bool) !u8 {
-    const upvalue_count = &compiler.function.upvalue_count;
-    for (compiler.upvalues.items, 0..) |upvalue, i| {
+    const upvalues = &compiler.upvalues;
+    for (upvalues.items, 0..) |upvalue, i| {
         if (upvalue.index == index and upvalue.is_local == is_local) return @intCast(i);
     }
 
-    if (upvalue_count.* > std.math.maxInt(u8)) {
+    if (upvalues.items.len == U8_COUNT) {
         self.err("Too many closure variables in function.");
         return 0;
     }
 
-    try compiler.upvalues.append(.{ .index = index, .is_local = is_local });
-    upvalue_count.* += 1;
-    return @intCast(upvalue_count.* - 1);
+    try upvalues.append(.{ .index = index, .is_local = is_local });
+    compiler.function.upvalue_count += 1;
+    return @intCast(upvalues.items.len - 1);
 }
 
 fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) !?u8 {
