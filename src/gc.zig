@@ -105,6 +105,9 @@ pub const GC = struct {
 
         // compilers
         try self.markCompilerRoots();
+
+        // init_string
+        try self.markObj(&self.vm.init_string.obj);
     }
 
     fn traceReferences(self: *GC) !void {
@@ -204,9 +207,8 @@ pub const GC = struct {
 
     fn markCompilerRoots(self: *GC) !void {
         const compiler = self.vm.compiler orelse return;
-        // the inner type "compiler" is what holds the function declaration
-        var cur_compiler = compiler.compiler;
-        while (cur_compiler) |cur| : (cur_compiler = cur.enclosing) {
+        var cur_func = compiler.current_func;
+        while (cur_func) |cur| : (cur_func = cur.enclosing) {
             try self.markObj(&cur.function.obj);
         }
     }

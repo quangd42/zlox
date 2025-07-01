@@ -26,7 +26,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
 
     const oc: OpCode = @enumFromInt(chunk.getByteAt(offset) catch unreachable);
     return switch (oc) {
-        .CONSTANT, .DEFINE_GLOBAL, .GET_GLOBAL, .SET_GLOBAL, .CLASS, .GET_PROPERTY, .SET_PROPERTY => constantInstruction(oc, chunk, offset),
+        .CONSTANT, .DEFINE_GLOBAL, .GET_GLOBAL, .SET_GLOBAL, .CLASS, .GET_PROPERTY, .SET_PROPERTY, .METHOD => constantInstruction(oc, chunk, offset),
         .SET_LOCAL, .GET_LOCAL, .CALL, .GET_UPVALUE, .SET_UPVALUE => byteInstruction(oc, chunk, offset),
         .JUMP, .JUMP_IF_TRUE, .JUMP_IF_FALSE => jumpInstruction(oc, 1, chunk, offset),
         .LOOP => jumpInstruction(oc, -1, chunk, offset),

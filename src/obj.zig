@@ -33,6 +33,7 @@ pub fn as(obj: *Obj, comptime obj_t: Type) *obj_t.VariantType() {
 }
 
 pub const Type = enum {
+    BoundMethod,
     Class,
     Closure,
     Function,
@@ -43,6 +44,7 @@ pub const Type = enum {
 
     pub fn VariantType(self: Type) type {
         return switch (self) {
+            .BoundMethod => BoundMethod,
             .Class => Class,
             .Closure => Closure,
             .Function => Function,
@@ -67,6 +69,8 @@ fn allocateObj(vm: *VM, comptime obj_t: Type) !*obj_t.VariantType() {
 
 pub const FunctionType = enum {
     Function,
+    Initializer,
+    Method,
     Script,
 };
 
@@ -315,17 +319,23 @@ pub const Closure = struct {
 pub const Class = struct {
     obj: Obj,
     name: *String,
+    methods: Table,
 
     const Self = @This();
 
     pub fn init(vm: *VM, name: *String) !*Self {
         const out = try allocateObj(vm, .Class);
-        out.name = name;
+        out.* = .{
+            .obj = out.obj,
+            .name = name,
+            .methods = .init(vm.allocator),
+        };
         return out;
     }
 
     pub fn deinit(self: *Self, vm: *VM) void {
         // .name will be collected by gc
+        self.methods.deinit();
         vm.allocator.destroy(self);
     }
 
@@ -389,5 +399,40 @@ pub const Instance = struct {
         writer: anytype,
     ) !void {
         try writer.print("{s} instance", .{self.class.name.chars});
+    }
+};
+
+pub const BoundMethod = struct {
+    obj: Obj,
+    receiver: Value,
+    method: *Closure,
+
+    const Self = @This();
+
+    pub fn init(vm: *VM, receiver: Value, method: *Closure) !*Self {
+        const out = try allocateObj(vm, .BoundMethod);
+        out.* = .{
+            .obj = out.obj,
+            .receiver = receiver,
+            .method = method,
+        };
+        return out;
+    }
+
+    pub fn deinit(self: *Self, vm: *VM) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub fn eql(self: *Self, other: *Self) bool {
+        return self == other;
+    }
+
+    pub fn format(
+        self: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("{}", .{self.method.function});
     }
 };

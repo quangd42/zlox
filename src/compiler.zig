@@ -24,7 +24,8 @@ const Error = error{OutOfMemory};
 
 scanner: Scanner,
 parser: Parser,
-compiler: ?*Compiler,
+current_func: ?*Compiler,
+current_class: ?*ClassCompiler,
 vm: *VM,
 
 const Self = @This();
@@ -32,7 +33,8 @@ pub fn init(vm: *VM, source: []const u8) !Self {
     var self = Self{
         .scanner = Scanner.init(source),
         .parser = Parser{},
-        .compiler = null,
+        .current_func = null,
+        .current_class = null,
         .vm = vm,
     };
     self.advance();
@@ -43,23 +45,25 @@ fn setupCompiler(self: *Self, compiler: *Compiler) !void {
     if (compiler.type != .Script) {
         compiler.function.name = try Obj.String.init(self.vm, self.parser.previous.lexeme);
     }
-    compiler.enclosing = self.compiler;
-    self.compiler = compiler; // important to happen before any further allocation to keep compiler alive
-    try compiler.locals.append(.{ .depth = 0, .lexeme = "" });
+    compiler.enclosing = self.current_func;
+    self.current_func = compiler; // important to happen before any further allocation to keep compiler alive
+    try compiler.locals.append(.{
+        .depth = 0,
+        .lexeme = if (compiler.type != .Function) "this" else "",
+    });
 }
 
 fn endCompiler(self: *Self) !*Obj.Function {
-    try self.emitOpCode(.NIL); // Implicit nil return at the end of function
-    try self.emitOpCode(.RETURN);
+    try self.emitReturn();
 
     if (TRACE_EXECUTION and self.parser.had_error) {
-        const name = if (self.compiler.?.function.name) |str| str.chars else "<script>";
+        const name = if (self.current_func.?.function.name) |str| str.chars else "<script>";
         debug.disassembleChunk(self.chunk(), name);
     }
-    const compiler = self.compiler.?;
-    defer compiler.deinit(); // TODO: do I need to clean up here?
-    self.compiler = compiler.enclosing;
-    return compiler.function;
+    const current = self.current_func.?;
+    defer current.deinit(); // clean up early, but can be left to gc
+    self.current_func = current.enclosing;
+    return current.function;
 }
 
 pub fn compile(self: *Self) !*Obj.Function {
@@ -74,16 +78,16 @@ pub fn compile(self: *Self) !*Obj.Function {
 }
 
 fn chunk(self: *Self) *Chunk {
-    return &self.compiler.?.function.chunk;
+    return &self.current_func.?.function.chunk;
 }
 fn beginScope(self: *Self) void {
-    self.compiler.?.scope_depth += 1;
+    self.current_func.?.scope_depth += 1;
 }
 
 fn endScope(self: *Self) !void {
-    const scope_depth = &self.compiler.?.scope_depth;
+    const scope_depth = &self.current_func.?.scope_depth;
     scope_depth.* -= 1;
-    const locals = &self.compiler.?.locals;
+    const locals = &self.current_func.?.locals;
     while (true) : (_ = locals.pop()) {
         const stack_top = locals.getLastOrNull() orelse break;
         if (stack_top.depth.? <= scope_depth.*) break;
@@ -114,14 +118,26 @@ fn emitLoop(self: *Self, loop_start: usize) !void {
     try self.emitOpCode(.LOOP);
     const distance = self.chunk().code.items.len - loop_start + 2;
     if (distance > std.math.maxInt(u16))
-        return self.errorAtPrev("Loop body too large.");
+        return self.err("Loop body too large.");
     try self.emitByte(@intCast(distance >> 8 & 0xff));
     try self.emitByte(@intCast(distance & 0xff));
 }
 
+fn emitReturn(self: *Self) !void {
+    if (self.current_func.?.type == .Initializer) {
+        // always return instance (at slot 0 of call frame) form initializer
+        try self.emitOpCode(.GET_LOCAL);
+        try self.emitByte(0);
+    } else {
+        // Implicit nil return at the end of function
+        try self.emitOpCode(.NIL);
+    }
+    try self.emitOpCode(.RETURN);
+}
+
 fn emitConstant(self: *Self, value: Value) !void {
     const const_idx = self.chunk().addConstant(value) catch {
-        return self.errorAtPrev("Too many constants in one chunk.");
+        return self.err("Too many constants in one chunk.");
     };
     try self.chunk().writeConstant(const_idx, self.parser.previous.line);
 }
@@ -132,7 +148,7 @@ fn patchJump(self: *Self, offset: usize) void {
     const distance = self.chunk().code.items.len - offset - 2;
 
     if (distance > std.math.maxInt(u16))
-        return self.errorAtPrev("Too much code to jump over.");
+        return self.err("Too much code to jump over.");
 
     self.chunk().code.items[offset] = @as(u8, @intCast(distance >> 8)) & 0xff;
     self.chunk().code.items[offset + 1] = @as(u8, @intCast(distance)) & 0xff;
@@ -164,7 +180,7 @@ fn check(self: *Self, expected: TokenType) bool {
     return self.parser.current.type == expected;
 }
 
-fn errorAtPrev(self: *Self, message: []const u8) void {
+fn err(self: *Self, message: []const u8) void {
     self.errorAt(&self.parser.previous, message);
 }
 
@@ -201,7 +217,7 @@ fn synchronize(self: *Self) void {
 fn parsePrecedence(self: *Self, precedence: Precedence) !void {
     self.advance();
     const prefixFn = Rules.get(self.parser.previous.type).prefix orelse {
-        return self.errorAtPrev("Expect expression.");
+        return self.err("Expect expression.");
     };
     const can_assign = precedence.isLessEql(.ASSIGNMENT);
     try prefixFn(self, can_assign);
@@ -209,7 +225,7 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
     while (precedence.isLessEql(Rules.get(self.parser.current.type).precedence)) {
         self.advance();
         const infixFn = Rules.get(self.parser.previous.type).infix orelse {
-            return self.errorAtPrev("Expect infix operator.");
+            return self.err("Expect infix operator.");
         };
         try infixFn(self, can_assign);
     }
@@ -217,7 +233,7 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
     // At this point EQUAL should have been consumed already by valid parseFn
     // so the target must be invalid
     if (can_assign and self.match(.EQUAL)) {
-        return self.errorAtPrev("Invalid assignment target.");
+        return self.err("Invalid assignment target.");
     }
 }
 
@@ -229,9 +245,9 @@ fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
 }
 
 fn addLocal(self: *Self, lexeme: []const u8) !void {
-    const locals = &self.compiler.?.locals;
+    const locals = &self.current_func.?.locals;
     if (locals.items.len >= U8_COUNT)
-        return self.errorAtPrev("Too many local variables in function.");
+        return self.err("Too many local variables in function.");
     // depth = null to mark local as uninitialized
     try locals.append(.{ .lexeme = lexeme, .depth = null });
 }
@@ -242,7 +258,7 @@ fn resolveLocal(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
         const local = compiler.locals.items[i - 1];
         if (std.mem.eql(u8, local.lexeme, lexeme)) {
             const depth = local.depth orelse {
-                self.errorAtPrev("Can't read local variable in its own initializer.");
+                self.err("Can't read local variable in its own initializer.");
                 return null;
             };
             if (depth <= compiler.scope_depth) return @intCast(i - 1);
@@ -259,7 +275,7 @@ fn addUpvalue(self: *Self, compiler: *Compiler, index: u8, is_local: bool) u8 {
     }
 
     if (upvalue_count.* == std.math.maxInt(u8)) {
-        self.errorAtPrev("Too many closure variables in function.");
+        self.err("Too many closure variables in function.");
         return 0;
     }
 
@@ -274,17 +290,17 @@ fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
     const local = self.resolveLocal(enclosing, lexeme);
     if (local) |idx| {
         compiler.enclosing.?.locals.items[idx].is_captured = true;
-        return self.addUpvalue(self.compiler.?, idx, true);
+        return self.addUpvalue(self.current_func.?, idx, true);
     }
 
     const upvalue = self.resolveUpvalue(enclosing, lexeme);
-    if (upvalue) |idx| return self.addUpvalue(self.compiler.?, idx, false);
+    if (upvalue) |idx| return self.addUpvalue(self.current_func.?, idx, false);
 
     return null;
 }
 
 fn declareVariable(self: *Self) !void {
-    const current = self.compiler.?;
+    const current = self.current_func.?;
     // If we're at global scope, no work to do
     if (current.scope_depth == 0) return;
     // Look in current scope if variable with the same name is already declared
@@ -293,7 +309,7 @@ fn declareVariable(self: *Self) !void {
         const local = current.locals.items[i - 1];
         if (local.depth == null or local.depth.? < current.scope_depth) break;
         if (std.mem.eql(u8, self.parser.previous.lexeme, local.lexeme)) {
-            return self.errorAtPrev("Variable with the this name exists in this scope.");
+            return self.err("Variable with the this name exists in this scope.");
         }
     }
     // Add it to local stack
@@ -303,18 +319,18 @@ fn declareVariable(self: *Self) !void {
 fn parseVariable(self: *Self, err_msg: []const u8) !u8 {
     self.consume(.IDENTIFIER, err_msg);
     try self.declareVariable();
-    if (self.compiler.?.scope_depth > 0) return 0;
+    if (self.current_func.?.scope_depth > 0) return 0;
     return self.makeIdentConstant(self.parser.previous.lexeme);
 }
 
 fn markInitialized(self: *Self) void {
     // mark variable as initialized
-    const compiler = self.compiler.?;
+    const compiler = self.current_func.?;
     compiler.locals.items[compiler.locals.items.len - 1].depth = compiler.scope_depth;
 }
 
 fn defineVariable(self: *Self, constant_idx: u8) !void {
-    const compiler = self.compiler.?;
+    const compiler = self.current_func.?;
     if (compiler.scope_depth > 0) {
         self.markInitialized();
         return;
@@ -329,7 +345,7 @@ fn argumentList(self: *Self) !u8 {
     while (!self.check(.RIGHT_PAREN)) {
         try self.expression();
         if (arg_count == 255) {
-            self.errorAtPrev("Can't have more than 255 arguments.");
+            self.err("Can't have more than 255 arguments.");
             return arg_count;
         }
         arg_count += 1;
@@ -388,17 +404,18 @@ fn statement(self: *Self) Error!void {
 
 fn returnStatement(self: *Self) !void {
     self.advance(); // RETURN
-    if (self.compiler.?.type == .Script) {
-        return self.errorAtPrev("Can't return from top-level code.");
+    if (self.current_func.?.type == .Script) {
+        return self.err("Can't return from top-level code.");
     }
     if (self.match(.SEMICOLON)) {
-        try self.emitOpCode(.NIL);
-        try self.emitOpCode(.RETURN);
-    } else {
-        try self.expression();
-        self.consume(.SEMICOLON, "Expect ';' after return statement.");
-        try self.emitOpCode(.RETURN);
+        return self.emitReturn();
     }
+    if (self.current_func.?.type == .Initializer) {
+        self.err("Can't return a value from an initializer.");
+    }
+    try self.expression();
+    self.consume(.SEMICOLON, "Expect ';' after return statement.");
+    try self.emitOpCode(.RETURN);
 }
 
 fn printStatement(self: *Self) !void {
@@ -501,12 +518,12 @@ fn function(self: *Self, fun_type: FunctionType) !void {
 
     self.consume(.LEFT_PAREN, "Expect '(' after function name.");
     while (!self.check(.RIGHT_PAREN)) {
-        self.compiler.?.function.arity += 1;
+        self.current_func.?.function.arity += 1;
         const const_idx = try self.parseVariable("Expect parameter name.");
         try self.defineVariable(const_idx);
         if (self.check(.COMMA)) {
             self.advance(); // COMMA
-            if (self.compiler.?.function.arity == 255) {
+            if (self.current_func.?.function.arity == 255) {
                 self.errorAtCurrent("Can't have more than 255 parameters.");
                 // skip until ')' to avoid recursive panic
                 while (!self.check(.RIGHT_PAREN)) self.advance();
@@ -528,6 +545,17 @@ fn function(self: *Self, fun_type: FunctionType) !void {
     }
 }
 
+fn method(self: *Self) !void {
+    self.consume(.IDENTIFIER, "Expect method name.");
+    const method_name = self.parser.previous.lexeme;
+    const method_name_idx = try self.makeIdentConstant(method_name);
+
+    const method_type: FunctionType = if (std.mem.eql(u8, method_name, "init")) .Initializer else .Method;
+    try self.function(method_type);
+    try self.emitOpCode(.METHOD);
+    try self.emitByte(method_name_idx);
+}
+
 fn funDeclaration(self: *Self) !void {
     self.advance(); // FUN
     const fun_name_idx = try self.parseVariable("Expect function name.");
@@ -539,6 +567,7 @@ fn funDeclaration(self: *Self) !void {
 fn classDeclaration(self: *Self) !void {
     self.advance(); // CLASS
     self.consume(.IDENTIFIER, "Expect class name.");
+    const class_name = self.parser.previous.lexeme;
     const class_name_idx = try self.makeIdentConstant(self.parser.previous.lexeme);
     try self.declareVariable();
 
@@ -546,9 +575,46 @@ fn classDeclaration(self: *Self) !void {
     try self.emitByte(class_name_idx);
     try self.defineVariable(class_name_idx);
 
+    var class_compiler = ClassCompiler{};
+    class_compiler.enclosing = self.current_class;
+    self.current_class = &class_compiler;
+
+    try self.namedVariable(class_name, false);
     self.consume(.LEFT_BRACE, "Expect '{' before class body.");
+    while (!self.check(.RIGHT_BRACE) and !self.check(.EOF)) {
+        try self.method();
+    }
     self.consume(.RIGHT_BRACE, "Expect '}' after class body.");
+    try self.emitOpCode(.POP);
+
+    self.current_class = self.current_class.?.enclosing;
 }
+
+test "compiler init & parse simple expression" {
+    const source = "print 1 + 275;";
+    var vm = try @import("vm.zig").VM.init(testing.allocator);
+    defer vm.deinit();
+    var state = try Self.init(vm, source);
+    const fun = try state.compile();
+
+    try testing.expectEqual(null, fun.name);
+    try testing.expectEqual(0, fun.arity);
+    try testing.expectEqual(2, fun.chunk.constants.items.len);
+    try testing.expectEqual(Value{ .Number = 1 }, fun.chunk.constants.items[0]);
+    try testing.expectEqual(Value{ .Number = 275 }, fun.chunk.constants.items[1]);
+    try testing.expectEqual(OpCode.ADD, @as(OpCode, @enumFromInt(fun.chunk.code.items[4])));
+}
+
+const Local = struct {
+    lexeme: []const u8,
+    depth: ?u8,
+    is_captured: bool = false,
+};
+
+const Upvalue = struct {
+    index: u8,
+    is_local: bool,
+};
 
 const U8_COUNT = std.math.maxInt(u8) + 1;
 
@@ -578,30 +644,8 @@ pub const Compiler = struct {
     }
 };
 
-test "compiler init & parse simple expression" {
-    const source = "print 1 + 275;";
-    var vm = try @import("vm.zig").VM.init(testing.allocator);
-    defer vm.deinit();
-    var state = try Self.init(vm, source);
-    const fun = try state.compile();
-
-    try testing.expectEqual(null, fun.name);
-    try testing.expectEqual(0, fun.arity);
-    try testing.expectEqual(2, fun.chunk.constants.items.len);
-    try testing.expectEqual(Value{ .Number = 1 }, fun.chunk.constants.items[0]);
-    try testing.expectEqual(Value{ .Number = 275 }, fun.chunk.constants.items[1]);
-    try testing.expectEqual(OpCode.ADD, @as(OpCode, @enumFromInt(fun.chunk.code.items[4])));
-}
-
-const Local = struct {
-    lexeme: []const u8,
-    depth: ?u8,
-    is_captured: bool = false,
-};
-
-const Upvalue = struct {
-    index: u8,
-    is_local: bool,
+pub const ClassCompiler = struct {
+    enclosing: ?*ClassCompiler = null,
 };
 
 const Parser = struct {
@@ -675,7 +719,7 @@ const Rules = ParseRuleArray.init(.{
     .PRINT = .{},
     .RETURN = .{},
     .SUPER = .{},
-    .THIS = .{},
+    .THIS = .{ .prefix = this },
     .TRUE = .{ .prefix = literal },
     .VAR = .{},
     .WHILE = .{},
@@ -695,8 +739,8 @@ test "test parse rule table" {
 
 fn number(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
-    const val = std.fmt.parseFloat(f64, self.parser.previous.lexeme) catch |err| {
-        print("{any}: ", .{err});
+    const val = std.fmt.parseFloat(f64, self.parser.previous.lexeme) catch |e| {
+        print("{any}: ", .{e});
         @panic("failed to parse number literal.");
     };
     try self.emitConstant(.{ .Number = val });
@@ -791,10 +835,10 @@ fn namedVariable(self: *Self, lexeme: []const u8, can_assign: bool) !void {
     var getOp: OpCode = .GET_LOCAL;
     var setOp: OpCode = .SET_LOCAL;
     const const_idx: u8 = blk: {
-        if (self.resolveLocal(self.compiler.?, lexeme)) |idx| {
+        if (self.resolveLocal(self.current_func.?, lexeme)) |idx| {
             break :blk idx;
         }
-        if (self.resolveUpvalue(self.compiler.?, lexeme)) |idx| {
+        if (self.resolveUpvalue(self.current_func.?, lexeme)) |idx| {
             getOp = .GET_UPVALUE;
             setOp = .SET_UPVALUE;
             break :blk idx;
@@ -817,6 +861,13 @@ fn variable(self: *Self, can_assign: bool) Error!void {
     try namedVariable(self, self.parser.previous.lexeme, can_assign);
 }
 
+fn this(self: *Self, can_assign: bool) Error!void {
+    _ = can_assign;
+    if (self.current_class == null)
+        return self.err("Can't use 'this' outside of a class.");
+    try self.variable(false);
+}
+
 fn and_(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const skip_rhs_loc = try self.emitJump(.JUMP_IF_FALSE);
@@ -824,6 +875,7 @@ fn and_(self: *Self, can_assign: bool) Error!void {
     try self.parsePrecedence(.AND);
     self.patchJump(skip_rhs_loc);
 }
+
 fn or_(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const skip_rhs_loc = try self.emitJump(.JUMP_IF_TRUE);

@@ -41,6 +41,7 @@ pub const OpCode = enum(u8) {
     CLOSE_UPVALUE,
     RETURN,
     CLASS,
+    METHOD,
 };
 
 const CONSTANT_MAX = std.math.maxInt(u8) + 1;

@@ -31,6 +31,7 @@ pub const VM = struct {
     stack: std.ArrayList(Value),
     objects: ?*Obj = null,
     open_upvalues: ?*Obj.Upvalue = null,
+    init_string: *Obj.String,
     strings: Table,
     globals: Table,
     compiler: ?Compiler,
@@ -57,6 +58,8 @@ pub const VM = struct {
             // pre allocate enough memory for the stack to avoid triggering gc
             // when using the stack for keeping other objects connected
             .stack = try std.ArrayList(Value).initCapacity(vm.allocator, 64),
+            // init_string MUST be initialized after the stack
+            .init_string = try .init(vm, "init"),
         };
         vm.defineNative("clock", clockNative) catch {
             @panic("failed to define native function.");
@@ -187,11 +190,13 @@ pub const VM = struct {
                         return self.runtimeError("Only instances have properties.", .{});
                     };
                     const name = self.readString();
-                    const value = instance.fields.get(name) orelse {
-                        return self.runtimeError("Undefined property '{s}'.\n", .{name});
-                    };
-                    _ = self.pop(); // instance
-                    try self.push(value);
+                    const maybe_value = instance.fields.get(name);
+                    if (maybe_value) |value| {
+                        _ = self.pop(); // instance
+                        try self.push(value);
+                        continue;
+                    }
+                    try self.bindMethod(instance.class, name);
                 },
                 .SET_PROPERTY => {
                     const value = self.peek(0);
@@ -284,6 +289,7 @@ pub const VM = struct {
                     const class = try Obj.Class.init(self, self.readString());
                     try self.push(.{ .Obj = &class.obj });
                 },
+                .METHOD => try self.defineMethod(self.readString()),
             }
         }
     }
@@ -430,6 +436,8 @@ pub const VM = struct {
             .Obj => |callee_obj| switch (callee_obj.type) {
                 .BoundMethod => {
                     const bound = callee_obj.as(.BoundMethod);
+                    const callee_idx = self.stack.items.len - arg_count - 1;
+                    self.stack.items[callee_idx] = bound.receiver;
                     try self.call(bound.method, arg_count);
                 },
                 .Class => {
@@ -437,6 +445,11 @@ pub const VM = struct {
                     const instance: *Obj.Instance = try .init(self, class);
                     const callee_idx = self.stack.items.len - arg_count - 1; // index of the callee Value on the stack
                     self.stack.items[callee_idx] = .{ .Obj = &instance.obj };
+                    const maybe_init = class.methods.get(self.init_string);
+                    if (maybe_init) |init_val| {
+                        try self.call(init_val.Obj.as(.Closure), arg_count);
+                    } else if (arg_count != 0)
+                        return self.runtimeError("Expected 0 arguments but got {d}.", .{arg_count});
                 },
                 .Closure => self.call(callee_obj.as(.Closure), arg_count),
                 .Native => {
@@ -480,6 +493,21 @@ pub const VM = struct {
             upvalue.closed = upvalue.location[0];
             upvalue.location = @ptrCast(&upvalue.closed);
         }
+    }
+
+    fn defineMethod(self: *VM, name: *Obj.String) !void {
+        const method = self.peek(0);
+        const class = self.peek(1).asObj(.Class).?;
+        _ = try class.methods.set(name, method);
+        _ = self.pop();
+    }
+
+    fn bindMethod(self: *VM, class: *Obj.Class, name: *Obj.String) !void {
+        const method = class.methods.get(name) orelse
+            return self.runtimeError("Undefined property '{s}'.", .{name});
+        const bound = try Obj.BoundMethod.init(self, self.peek(0), method.asObj(.Closure).?);
+        _ = self.pop();
+        try self.push(.{ .Obj = &bound.obj });
     }
 };
 
