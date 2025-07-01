@@ -20,6 +20,7 @@ pub const OpCode = enum(u8) {
     SET_UPVALUE,
     GET_PROPERTY,
     SET_PROPERTY,
+    GET_SUPER,
     EQUAL,
     GREATER,
     GREATER_EQUAL,
@@ -38,10 +39,12 @@ pub const OpCode = enum(u8) {
     LOOP,
     CALL,
     INVOKE,
+    SUPER_INVOKE,
     CLOSURE,
     CLOSE_UPVALUE,
     RETURN,
     CLASS,
+    INHERIT,
     METHOD,
 };
 
@@ -88,13 +91,13 @@ pub const Chunk = struct {
         try self.writeByte(constant_idx, line);
     }
 
-    pub fn byteAt(self: *Chunk, offset: usize) !u8 {
-        if (offset > self.code.items.len) return error.OutOfBounds;
+    pub fn byteAt(self: *Chunk, offset: usize) u8 {
+        std.debug.assert(offset <= self.code.items.len);
         return self.code.items[offset];
     }
 
-    pub fn constAt(self: *Chunk, offset: u8) !Value {
-        if (offset > self.constants.items.len) return error.OutOfBounds;
+    pub fn constAt(self: *Chunk, offset: u8) Value {
+        std.debug.assert(offset <= self.constants.items.len);
         return self.constants.items[offset];
     }
 };

@@ -568,16 +568,33 @@ fn classDeclaration(self: *Self) !void {
     self.advance(); // CLASS
     self.consume(.IDENTIFIER, "Expect class name.");
     const class_name = self.parser.previous.lexeme;
-    const class_name_idx = try self.makeIdentConstant(self.parser.previous.lexeme);
+    const class_name_idx = try self.makeIdentConstant(class_name);
     try self.declareVariable();
 
     try self.emitOpCode(.CLASS);
     try self.emitByte(class_name_idx);
     try self.defineVariable(class_name_idx);
 
-    var class_compiler = ClassCompiler{};
-    class_compiler.enclosing = self.current_class;
+    var class_compiler = ClassCompiler{ .enclosing = self.current_class };
     self.current_class = &class_compiler;
+    defer self.current_class = self.current_class.?.enclosing;
+
+    if (self.match(.LESS)) {
+        self.consume(.IDENTIFIER, "Expect superclass name.");
+        try self.variable(false);
+        if (std.mem.eql(u8, class_name, self.parser.previous.lexeme)) {
+            self.err("A class can't inherit from itself.");
+        }
+
+        self.beginScope();
+        try self.addLocal("super");
+        // self.markInitialized(); // NOTE: self.defineVariable()?
+        try self.defineVariable(0);
+
+        try self.namedVariable(class_name, false);
+        try self.emitOpCode(.INHERIT);
+        self.current_class.?.has_super = true;
+    }
 
     try self.namedVariable(class_name, false);
     self.consume(.LEFT_BRACE, "Expect '{' before class body.");
@@ -587,7 +604,7 @@ fn classDeclaration(self: *Self) !void {
     self.consume(.RIGHT_BRACE, "Expect '}' after class body.");
     try self.emitOpCode(.POP);
 
-    self.current_class = self.current_class.?.enclosing;
+    if (self.current_class.?.has_super) try self.endScope();
 }
 
 test "compiler init & parse simple expression" {
@@ -646,6 +663,7 @@ pub const Compiler = struct {
 
 pub const ClassCompiler = struct {
     enclosing: ?*ClassCompiler = null,
+    has_super: bool = false,
 };
 
 const Parser = struct {
@@ -718,7 +736,7 @@ const Rules = ParseRuleArray.init(.{
     .OR = .{ .infix = or_, .precedence = .OR },
     .PRINT = .{},
     .RETURN = .{},
-    .SUPER = .{},
+    .SUPER = .{ .prefix = super },
     .THIS = .{ .prefix = this },
     .TRUE = .{ .prefix = literal },
     .VAR = .{},
@@ -865,6 +883,31 @@ fn namedVariable(self: *Self, lexeme: []const u8, can_assign: bool) !void {
 // prefix parseFn for variable
 fn variable(self: *Self, can_assign: bool) Error!void {
     try namedVariable(self, self.parser.previous.lexeme, can_assign);
+}
+
+fn super(self: *Self, can_assign: bool) Error!void {
+    _ = can_assign;
+
+    if (self.current_class) |current| {
+        if (!current.has_super) self.err("Can't use 'super' in a class with no superclass.");
+    } else self.err("Can't use 'super' outside of a class.");
+
+    self.consume(.DOT, "Expect '.' after 'super'.");
+    self.consume(.IDENTIFIER, "Expect superclass method name.");
+    const method_name_idx = try self.makeIdentConstant(self.parser.previous.lexeme);
+
+    try self.namedVariable("this", false);
+    if (self.match(.LEFT_PAREN)) {
+        const arg_count = try self.argumentList();
+        try self.namedVariable("super", false);
+        try self.emitOpCode(.SUPER_INVOKE);
+        try self.emitByte(method_name_idx);
+        try self.emitByte(arg_count);
+    } else {
+        try self.namedVariable("super", false);
+        try self.emitOpCode(.GET_SUPER);
+        try self.emitByte(method_name_idx);
+    }
 }
 
 fn this(self: *Self, can_assign: bool) Error!void {

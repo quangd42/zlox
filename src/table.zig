@@ -43,6 +43,13 @@ pub const Table = struct {
         return is_new;
     }
 
+    pub fn addAll(to: *Self, from: *Self) !void {
+        for (from.entries) |mb_entry| {
+            const entry = mb_entry orelse continue;
+            if (entry.key) |k| _ = try to.set(k, entry.value);
+        }
+    }
+
     pub fn get(self: *Self, key: *ObjString) ?Value {
         if (self.entries.len == 0) return null;
         const entry = findEntry(self.entries, key);
@@ -142,6 +149,25 @@ test "table ops" {
     // force increaseCap to clear tombstone, expect count = 0
     try table.increaseCapacity();
     try testing.expectEqual(0, table.count);
+    // addAll
+    var table2 = Table.init(testing.allocator);
+    try table2.addAll(&table);
+    for (table2.entries) |mb_entry| {
+        const entry = mb_entry orelse continue;
+        if (entry.key) |k| {
+            const src = table.get(k);
+            try testing.expect(src != null);
+            try testing.expect(entry.value.eql(src.?));
+        }
+    }
+    for (table.entries) |mb_entry| {
+        const entry = mb_entry orelse continue;
+        if (entry.key) |k| {
+            const src = table2.get(k);
+            try testing.expect(src != null);
+            try testing.expect(entry.value.eql(src.?));
+        }
+    }
 }
 
 test "rewrite key" {

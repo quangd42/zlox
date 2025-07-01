@@ -210,6 +210,11 @@ pub const VM = struct {
                     _ = self.pop(); // instance
                     try self.push(value); // push value back
                 },
+                .GET_SUPER => {
+                    const name = self.readString();
+                    const superclass = self.pop().asObj(.Class).?;
+                    try self.bindMethod(superclass, name);
+                },
                 .EQUAL => try self.equalOp(),
                 .GREATER => try self.binaryOp(.GREATER),
                 .GREATER_EQUAL => try self.binaryOp(.GREATER_EQUAL),
@@ -259,6 +264,13 @@ pub const VM = struct {
                     try self.invoke(method, arg_count);
                     frame = self.topFrame();
                 },
+                .SUPER_INVOKE => {
+                    const method = self.readString();
+                    const arg_count = self.readByte();
+                    const superclass = self.pop().asObj(.Class).?;
+                    try self.invokeFromClass(superclass, method, arg_count);
+                    frame = self.topFrame();
+                },
                 .CLOSURE => {
                     const function = self.readConstant().asObj(.Function).?;
                     const closure = try Obj.Closure.init(self, function);
@@ -295,6 +307,13 @@ pub const VM = struct {
                     const class = try Obj.Class.init(self, self.readString());
                     try self.push(.{ .Obj = &class.obj });
                 },
+                .INHERIT => {
+                    const superclass = self.peek(1).asObj(.Class) orelse
+                        return self.runtimeError("Superclass must be a class.", .{});
+                    const subclass = self.peek(0).asObj(.Class).?;
+                    try subclass.methods.addAll(&superclass.methods);
+                    _ = self.pop(); // subclass
+                },
                 .METHOD => try self.defineMethod(self.readString()),
             }
         }
@@ -321,13 +340,13 @@ pub const VM = struct {
     inline fn readByte(self: *VM) u8 {
         const frame = self.topFrame();
         frame.ip += 1;
-        return frame.closure.function.chunk.byteAt(frame.ip - 1) catch unreachable;
+        return frame.closure.function.chunk.byteAt(frame.ip - 1);
     }
 
     inline fn readConstant(self: *VM) Value {
         const frame = &self.frames.getLast();
         const constant_idx = self.readByte();
-        return frame.closure.function.chunk.constAt(constant_idx) catch unreachable;
+        return frame.closure.function.chunk.constAt(constant_idx);
     }
 
     inline fn readShort(self: *VM) u16 {
@@ -528,7 +547,7 @@ pub const VM = struct {
 
     fn bindMethod(self: *VM, class: *Obj.Class, name: *Obj.String) !void {
         const method = class.methods.get(name) orelse
-            return self.runtimeError("Undefined property '{s}'.", .{name});
+            return self.runtimeError("Undefined property '{s}'.", .{name.chars});
         const bound = try Obj.BoundMethod.init(self, self.peek(0), method.asObj(.Closure).?);
         _ = self.pop();
         try self.push(.{ .Obj = &bound.obj });

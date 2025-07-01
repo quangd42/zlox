@@ -217,22 +217,13 @@ test "string interning" {
 
 test "concatenate strings" {
     var vm = try VM.init(testing.allocator);
-    // explicitly set vm.objects = null because all strings are going
-    // to be freed individually in this test
     defer vm.deinit();
-    defer vm.objects = null;
     const original_str: []const u8 = "Hello ";
     const a_str = try String.init(vm, original_str);
     const b_str = try String.init(vm, "world!");
     const out = try a_str.concat(vm, b_str);
-    defer b_str.deinit(vm);
-    defer out.deinit(vm);
     // Expect new string has all the right chars
     try testing.expectEqualSlices(u8, "Hello world!", out.chars);
-    // Make sure that the "const" source string was not accidentally freed
-    // when a_str is freed
-    a_str.deinit(vm);
-    try testing.expectEqualStrings("Hello ", original_str);
 }
 
 fn fnvHash(key: []const u8) u32 {

@@ -24,9 +24,18 @@ pub fn disassembleInstruction(c: *Chunk, offset: usize) usize {
         print("   | ", .{});
     }
 
-    const oc: OpCode = @enumFromInt(c.getByteAt(offset) catch unreachable);
+    const oc: OpCode = @enumFromInt(c.byteAt(offset));
     return switch (oc) {
-        .CONSTANT, .DEFINE_GLOBAL, .GET_GLOBAL, .SET_GLOBAL, .CLASS, .GET_PROPERTY, .SET_PROPERTY, .METHOD => constantInstruction(oc, c, offset),
+        .CONSTANT,
+        .DEFINE_GLOBAL,
+        .GET_GLOBAL,
+        .SET_GLOBAL,
+        .CLASS,
+        .GET_PROPERTY,
+        .SET_PROPERTY,
+        .METHOD,
+        .GET_SUPER,
+        => constantInstruction(oc, c, offset),
         .SET_LOCAL, .GET_LOCAL, .CALL, .GET_UPVALUE, .SET_UPVALUE => byteInstruction(oc, c, offset),
         .JUMP, .JUMP_IF_TRUE, .JUMP_IF_FALSE => jumpInstruction(oc, 1, c, offset),
         .LOOP => jumpInstruction(oc, -1, c, offset),
@@ -50,7 +59,7 @@ pub fn disassembleInstruction(c: *Chunk, offset: usize) usize {
             }
             break :blk idx;
         },
-        .INVOKE => invokeInstruction(oc, c, offset),
+        .INVOKE, .SUPER_INVOKE => invokeInstruction(oc, c, offset),
         else => simpleInstruction(oc, offset),
     };
 }
