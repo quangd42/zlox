@@ -1,12 +1,18 @@
 rundebug PATH="":
     zig build run {{ if PATH == "" { "" } else { "--" } }} {{ PATH }}
 
+rundebug-gc PATH="":
+    zig build run -Dstress-gc {{ if PATH == "" { "" } else { "--" } }} {{ PATH }}
+
 run PATH="":
     zig build -Doptimize=ReleaseFast
     ./zig-out/bin/zlox {{ PATH }}
 
 build:
     zig build
+
+build-gc:
+    zig build -Dstress-gc
 
 test:
     zig build test --summary new
@@ -16,6 +22,9 @@ test:
 # test/.fdignore will filter out unwanted tests
 
 test-all: build
+    sudo zig run test/test.zig -- zig-out/bin/zlox $TEST_FILES
+
+test-all-gc: build-gc
     sudo zig run test/test.zig -- zig-out/bin/zlox $TEST_FILES
 
 watch-run:

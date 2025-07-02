@@ -288,9 +288,10 @@ pub const Closure = struct {
     const Self = @This();
 
     pub fn init(vm: *VM, function: *Function) !*Self {
-        const out = try allocateObj(vm, .Closure);
+        // important to init upvalues before allocate obj otherwise gc will clean obj up
         const upvalues = try vm.allocator.alloc(?*Upvalue, function.upvalue_count);
         for (upvalues) |*upvalue| upvalue.* = null;
+        const out = try allocateObj(vm, .Closure);
         out.* = .{
             .obj = out.obj,
             .function = function,
