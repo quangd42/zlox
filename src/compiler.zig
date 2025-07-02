@@ -267,34 +267,33 @@ fn resolveLocal(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
     return null;
 }
 
-fn addUpvalue(self: *Self, compiler: *Compiler, index: u8, is_local: bool) u8 {
+fn addUpvalue(self: *Self, compiler: *Compiler, index: u8, is_local: bool) !u8 {
     const upvalue_count = &compiler.function.upvalue_count;
-    for (0..upvalue_count.*) |i| {
-        const upvalue = &compiler.upvalues[i];
+    for (compiler.upvalues.items, 0..) |upvalue, i| {
         if (upvalue.index == index and upvalue.is_local == is_local) return @intCast(i);
     }
 
-    if (upvalue_count.* == std.math.maxInt(u8)) {
+    if (upvalue_count.* > std.math.maxInt(u8)) {
         self.err("Too many closure variables in function.");
         return 0;
     }
 
-    compiler.upvalues[upvalue_count.*] = .{ .index = index, .is_local = is_local };
+    try compiler.upvalues.append(.{ .index = index, .is_local = is_local });
     upvalue_count.* += 1;
-    return upvalue_count.* - 1;
+    return @intCast(upvalue_count.* - 1);
 }
 
-fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) ?u8 {
+fn resolveUpvalue(self: *Self, compiler: *Compiler, lexeme: []const u8) !?u8 {
     const enclosing = compiler.enclosing orelse return null;
 
     const local = self.resolveLocal(enclosing, lexeme);
     if (local) |idx| {
-        compiler.enclosing.?.locals.items[idx].is_captured = true;
-        return self.addUpvalue(self.current_func.?, idx, true);
+        enclosing.locals.items[idx].is_captured = true;
+        return try self.addUpvalue(compiler, idx, true);
     }
 
-    const upvalue = self.resolveUpvalue(enclosing, lexeme);
-    if (upvalue) |idx| return self.addUpvalue(self.current_func.?, idx, false);
+    const upvalue = try self.resolveUpvalue(enclosing, lexeme);
+    if (upvalue) |idx| return try self.addUpvalue(compiler, idx, false);
 
     return null;
 }
@@ -540,8 +539,8 @@ fn function(self: *Self, fun_type: FunctionType) !void {
     try self.emitByte(const_idx);
 
     for (0..fun.upvalue_count) |i| {
-        try self.emitByte(@intFromBool(compiler.upvalues[i].is_local));
-        try self.emitByte(compiler.upvalues[i].index);
+        try self.emitByte(@intFromBool(compiler.upvalues.items[i].is_local));
+        try self.emitByte(compiler.upvalues.items[i].index);
     }
 }
 
@@ -640,17 +639,17 @@ pub const Compiler = struct {
 
     locals: std.ArrayList(Local),
     scope_depth: u8,
-    upvalues: [U8_COUNT]Upvalue,
+    upvalues: std.ArrayList(Upvalue),
 
     function: *Obj.Function,
     type: FunctionType,
 
     pub fn init(vm: *VM, fun_type: FunctionType) !Compiler {
         return Compiler{
-            .locals = std.ArrayList(Local).init(vm.allocator),
+            .locals = .init(vm.allocator),
             .scope_depth = 0,
-            .upvalues = [_]Upvalue{.{ .index = 0, .is_local = false }} ** U8_COUNT,
-            .function = try Obj.Function.init(vm),
+            .upvalues = .init(vm.allocator),
+            .function = try .init(vm),
             .type = fun_type,
         };
     }
@@ -862,7 +861,7 @@ fn namedVariable(self: *Self, lexeme: []const u8, can_assign: bool) !void {
         if (self.resolveLocal(self.current_func.?, lexeme)) |idx| {
             break :blk idx;
         }
-        if (self.resolveUpvalue(self.current_func.?, lexeme)) |idx| {
+        if (try self.resolveUpvalue(self.current_func.?, lexeme)) |idx| {
             getOp = .GET_UPVALUE;
             setOp = .SET_UPVALUE;
             break :blk idx;

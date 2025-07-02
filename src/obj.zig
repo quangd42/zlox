@@ -77,7 +77,7 @@ pub const FunctionType = enum {
 pub const Function = struct {
     obj: Obj,
     arity: u8,
-    upvalue_count: u8,
+    upvalue_count: u16,
     chunk: Chunk,
     name: ?*String,
 
