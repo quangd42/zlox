@@ -17,12 +17,12 @@
     }
   },
   {
-    "label": "Closure",
+    "label": "Benchmark",
     "adapter": "CodeLLDB",
     "program": "./zig-out/bin/zlox",
     "request": "launch",
     "cwd": "$ZED_WORKTREE_ROOT",
-    "args": ["test/closure/nested_closure.lox"],
+    "args": ["test/benchmark/string_equality.lox"],
     "build": {
       "command": "zig",
       "args": ["build", "-Dtrace-execution"]

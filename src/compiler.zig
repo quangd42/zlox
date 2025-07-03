@@ -80,6 +80,15 @@ pub fn compile(self: *Self) !*Obj.Function {
 fn chunk(self: *Self) *Chunk {
     return &self.current_func.?.function.chunk;
 }
+
+fn makeConstant(self: *Self, val: Value) !u8 {
+    const const_idx = self.chunk().addConstant(val) catch {
+        self.err("Too many constants in one chunk.");
+        return 0;
+    };
+    return const_idx;
+}
+
 fn beginScope(self: *Self) void {
     self.current_func.?.scope_depth += 1;
 }
@@ -136,10 +145,8 @@ fn emitReturn(self: *Self) !void {
 }
 
 fn emitConstant(self: *Self, value: Value) !void {
-    const const_idx = self.chunk().addConstant(value) catch {
-        return self.err("Too many constants in one chunk.");
-    };
-    try self.chunk().writeConst(const_idx, self.parser.previous.line);
+    const const_idx = try self.makeConstant(value);
+    try self.chunk().writeConst(@intCast(const_idx), self.parser.previous.line);
 }
 
 fn patchJump(self: *Self, offset: usize) void {
@@ -150,8 +157,8 @@ fn patchJump(self: *Self, offset: usize) void {
     if (distance > std.math.maxInt(u16))
         return self.err("Too much code to jump over.");
 
-    self.chunk().code.items[offset] = @as(u8, @intCast(distance >> 8)) & 0xff;
-    self.chunk().code.items[offset + 1] = @as(u8, @intCast(distance)) & 0xff;
+    self.chunk().code.items[offset] = @as(u8, @truncate(distance >> 8)) & 0xff;
+    self.chunk().code.items[offset + 1] = @as(u8, @truncate(distance)) & 0xff;
 }
 
 fn advance(self: *Self) void {
@@ -241,7 +248,7 @@ fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
     const str_obj = try Obj.String.init(self.vm, lexeme);
     try self.vm.push(.{ .Obj = &str_obj.obj });
     defer _ = self.vm.pop();
-    return try self.chunk().addConstant(.{ .Obj = &str_obj.obj });
+    return self.makeConstant(.{ .Obj = &str_obj.obj });
 }
 
 fn addLocal(self: *Self, lexeme: []const u8) !void {
@@ -534,7 +541,7 @@ fn function(self: *Self, fun_type: FunctionType) !void {
         self.errorAtCurrent("Expect '{' before function body.");
     try self.block();
     const fun = try self.endCompiler();
-    const const_idx = try self.chunk().addConstant(.{ .Obj = &fun.obj });
+    const const_idx = try self.makeConstant(.{ .Obj = &fun.obj });
     try self.emitOpCode(.CLOSURE);
     try self.emitByte(const_idx);
 

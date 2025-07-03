@@ -1,0 +1,22 @@
+test/benchmark/binary_trees.lox
+  min: 2850 ms; mean: 2925 ms
+test/benchmark/equality.lox
+  min: 6316 ms; mean: 6612 ms
+test/benchmark/fib.lox
+  min: 2220 ms; mean: 2254 ms
+test/benchmark/instantiation.lox
+  min: 776 ms; mean: 784 ms
+test/benchmark/invocation.lox
+  min: 588 ms; mean: 590 ms
+test/benchmark/method_call.lox
+  min: 346 ms; mean: 348 ms
+test/benchmark/properties.lox
+  min: 797 ms; mean: 809 ms
+test/benchmark/string_equality.lox
+  min: 2544 ms; mean: 2569 ms
+test/benchmark/trees.lox
+  min: 4376 ms; mean: 4432 ms
+test/benchmark/zoo.lox
+  min: 650 ms; mean: 655 ms
+test/benchmark/zoo_batch.lox
+  min: 9725 ms; mean: 9945 ms

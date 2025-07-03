@@ -81,6 +81,15 @@ pub const Chunk = struct {
     }
 
     pub fn addConstant(self: *Chunk, val: Value) !u8 {
+        // Check if the constant already exists in chunk.
+        // Linear search is adequate for 255 items
+        // Unsure why the book doesn't want this - presumably for performance
+        for (self.constants.items, 0..) |constant, i| {
+            if (constant.eql(val)) {
+                return @intCast(i);
+            }
+        }
+
         if (self.constants.items.len >= CONSTANT_MAX) return error.OutOfMemory;
         try self.constants.append(val);
         return @intCast(self.constants.items.len - 1);

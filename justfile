@@ -1,3 +1,9 @@
+# reference https://github.com/jwmerrill/zig-lox/blob/main/Makefile
+# test/.fdignore will filter out unwanted tests
+
+export TEST_FILES := `fd -t f -e lox . test/`
+export BENCHMARK_FILES := `fd -t f -e lox . test/benchmark`
+
 run-db PATH="":
     zig build run {{ if PATH == "" { "" } else { "--" } }} {{ PATH }}
 
@@ -10,14 +16,13 @@ release:
 test:
     zig build test --summary new
 
-# unclear why setting TEST_FILES as just variable doesn't work
-# workaround: export TEST_FILES to shell such as
-# fish: set -x TEST_FILES (fd -t f -e lox . test/)
-# test/.fdignore will filter out unwanted tests
-
 test-all: release
-    # sudo is needed for now because zig-cache does have permission
-    sudo zig run util/test.zig -- zig-out/bin/zlox $TEST_FILES
+    # sudo is needed for now because somehow when there is a large amount of TEST_FILES
+    # I got error: unable to create compilation: AccessDenied
+    zig run util/test.zig -- zig-out/bin/zlox $TEST_FILES
+
+benchmark: release
+    zig run util/benchmark.zig -- zig-out/bin/zlox $BENCHMARK_FILES
 
 watch-run:
     watchexec -r -e zig -- zig build run

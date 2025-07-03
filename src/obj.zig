@@ -101,10 +101,6 @@ pub const Function = struct {
         vm.allocator.destroy(self);
     }
 
-    pub fn eql(self: *Self, other: *Self) bool {
-        return self == other;
-    }
-
     pub fn format(
         self: Self,
         comptime _: []const u8,
@@ -135,10 +131,6 @@ pub const Native = struct {
 
     pub fn deinit(self: *Self, vm: *VM) void {
         vm.allocator.destroy(self);
-    }
-
-    pub fn eql(self: *Self, other: *Self) bool {
-        return self == other;
     }
 
     pub fn format(
@@ -193,10 +185,6 @@ pub const String = struct {
             return s;
         }
         return allocateString(vm, buffer, hash);
-    }
-
-    pub fn eql(self: *String, other: *String) bool {
-        return self.chars.ptr == other.chars.ptr;
     }
 
     pub fn format(
@@ -254,6 +242,8 @@ pub const Upvalue = struct {
 
     pub fn init(vm: *VM, slot: [*]Value) !*Self {
         const out = try allocateObj(vm, .Upvalue);
+        // try vm.push(.{ .Obj = &out.obj });
+        // defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
             .location = slot,
@@ -264,10 +254,6 @@ pub const Upvalue = struct {
 
     pub fn deinit(self: *Self, vm: *VM) void {
         vm.allocator.destroy(self);
-    }
-
-    pub fn eql(self: *Self, other: *Self) bool {
-        return self == other;
     }
 
     pub fn format(
@@ -292,6 +278,8 @@ pub const Closure = struct {
         const upvalues = try vm.allocator.alloc(?*Upvalue, function.upvalue_count);
         for (upvalues) |*upvalue| upvalue.* = null;
         const out = try allocateObj(vm, .Closure);
+        // try vm.push(.{ .Obj = &out.obj });
+        // defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
             .function = function,
@@ -303,10 +291,6 @@ pub const Closure = struct {
     pub fn deinit(self: *Self, vm: *VM) void {
         vm.allocator.free(self.upvalues);
         vm.allocator.destroy(self);
-    }
-
-    pub fn eql(self: *Self, other: *Self) bool {
-        return self == other;
     }
 
     pub fn format(
@@ -328,6 +312,8 @@ pub const Class = struct {
 
     pub fn init(vm: *VM, name: *String) !*Self {
         const out = try allocateObj(vm, .Class);
+        // try vm.push(.{ .Obj = &out.obj });
+        // defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
             .name = name,
@@ -340,10 +326,6 @@ pub const Class = struct {
         // .name will be collected by gc
         self.methods.deinit();
         vm.allocator.destroy(self);
-    }
-
-    pub fn eql(self: *Self, other: *Self) bool {
-        return self == other;
     }
 
     pub fn format(
@@ -377,6 +359,8 @@ pub const Instance = struct {
 
     pub fn init(vm: *VM, class: *Class) !*Self {
         const out = try allocateObj(vm, .Instance);
+        try vm.push(.{ .Obj = &out.obj });
+        defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
             .class = class,
@@ -389,10 +373,6 @@ pub const Instance = struct {
         // .class will be collected by gc
         self.fields.deinit();
         vm.allocator.destroy(self);
-    }
-
-    pub fn eql(self: *Self, other: *Self) bool {
-        return self == other;
     }
 
     pub fn format(
@@ -414,6 +394,8 @@ pub const BoundMethod = struct {
 
     pub fn init(vm: *VM, receiver: Value, method: *Closure) !*Self {
         const out = try allocateObj(vm, .BoundMethod);
+        // try vm.push(.{ .Obj = &out.obj });
+        // defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
             .receiver = receiver,
@@ -424,10 +406,6 @@ pub const BoundMethod = struct {
 
     pub fn deinit(self: *Self, vm: *VM) void {
         vm.allocator.destroy(self);
-    }
-
-    pub fn eql(self: *Self, other: *Self) bool {
-        return self == other;
     }
 
     pub fn format(

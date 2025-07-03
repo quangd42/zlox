@@ -86,26 +86,26 @@ pub const Table = struct {
     }
 
     fn findEntry(entries: []?Entry, key: *ObjString) *?Entry {
-        var idx = key.hash % entries.len;
+        var idx = key.hash & (entries.len - 1);
         var tombstone: ?*?Entry = null;
-        while (true) : (idx = (idx + 1) % entries.len) {
+        while (true) : (idx = (idx + 1) & (entries.len - 1)) {
             const entry = &entries[idx];
             // empty entry is the end of the chain, return captured tombstone or it
             const e = entry.* orelse return if (tombstone) |ts| ts else entry;
             const k = e.key orelse {
                 // found tombstone, save it if this is first tombstone encountered
-                if (tombstone != null) tombstone = entry;
+                if (tombstone == null) tombstone = entry;
                 continue;
             };
-            if (k.eql(key)) return entry; // found matching entry
+            if (k == key) return entry; // found matching entry
         }
     }
 
     pub fn findString(self: *Self, chars: []const u8, hash: u32) ?*ObjString {
         const entries = self.entries;
         if (entries.len == 0) return null;
-        var idx = hash % entries.len;
-        while (true) : (idx = (idx + 1) % entries.len) {
+        var idx = hash & (entries.len - 1);
+        while (true) : (idx = (idx + 1) & (entries.len - 1)) {
             const entry = entries[idx];
             const e = entry orelse return null;
             const key = e.key orelse continue;

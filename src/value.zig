@@ -59,11 +59,7 @@ pub const Value = union(Type) {
 
     pub fn eql(self: Value, other: Value) bool {
         switch (self) {
-            .Obj => |obj| {
-                switch (obj.type) {
-                    inline else => |t| return other.isObj(t) and self.Obj.as(t).eql(other.Obj.as(t)),
-                }
-            },
+            .Obj => |obj| return other.isObj(obj.type) and obj == other.Obj,
             inline else => |value, tag| {
                 return tag == std.meta.activeTag(other) and value == @field(other, @tagName(tag));
             },

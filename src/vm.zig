@@ -474,7 +474,7 @@ pub const VM = struct {
                 },
                 .Class => {
                     const class = callee_obj.as(.Class);
-                    const instance: *Obj.Instance = try .init(self, class);
+                    const instance = try Obj.Instance.init(self, class);
                     const callee_idx = self.stack.items.len - arg_count - 1; // index of the callee Value on the stack
                     self.stack.items[callee_idx] = .{ .Obj = &instance.obj };
                     const maybe_init = class.methods.get(self.init_string);
