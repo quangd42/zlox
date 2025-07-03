@@ -1,0 +1,11 @@
+var a = "before";
+print a; // expect: before
+
+var beverage = "cafe au lait";
+print beverage; // expect: cafe au lait
+
+a = "after";
+print a; // expect: after
+
+print a = "arg"; // expect: arg
+print a; // expect: arg

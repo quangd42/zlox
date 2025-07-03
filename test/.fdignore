@@ -1,0 +1,17 @@
+benchmark/
+scanning/
+expressions/
+for/closure_in_body.lox
+# class/
+# constructor/
+# field/
+# inheritance/
+# method/
+# super/
+# this/
+# *method*
+# *this*
+# *class*
+# *394*
+# *object*
+# *inherit*

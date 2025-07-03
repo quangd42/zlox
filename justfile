@@ -1,31 +1,23 @@
-rundebug PATH="":
+run-db PATH="":
     zig build run {{ if PATH == "" { "" } else { "--" } }} {{ PATH }}
 
-rundebug-gc PATH="":
-    zig build run -Dstress-gc {{ if PATH == "" { "" } else { "--" } }} {{ PATH }}
-
-run PATH="":
-    zig build -Doptimize=ReleaseFast
+run PATH="": release
     ./zig-out/bin/zlox {{ PATH }}
 
-build:
-    zig build
-
-build-gc:
-    zig build -Dstress-gc
+release:
+    zig build -Doptimize=ReleaseSafe
 
 test:
     zig build test --summary new
 
-# export TEST_FILES to shell such as
+# unclear why setting TEST_FILES as just variable doesn't work
+# workaround: export TEST_FILES to shell such as
 # fish: set -x TEST_FILES (fd -t f -e lox . test/)
 # test/.fdignore will filter out unwanted tests
 
-test-all: build
-    sudo zig run test/test.zig -- zig-out/bin/zlox $TEST_FILES
-
-test-all-gc: build-gc
-    sudo zig run test/test.zig -- zig-out/bin/zlox $TEST_FILES
+test-all: release
+    # sudo is needed for now because zig-cache does have permission
+    sudo zig run util/test.zig -- zig-out/bin/zlox $TEST_FILES
 
 watch-run:
     watchexec -r -e zig -- zig build run

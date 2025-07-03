@@ -4,26 +4,15 @@
 // see: https://zed.dev/docs/debugger
 [
   {
-    "label": "Build GC",
+    "label": "Stress GC",
     "adapter": "CodeLLDB",
     "program": "./zig-out/bin/zlox",
     "request": "launch",
     "cwd": "$ZED_WORKTREE_ROOT",
-    "args": ["test/function/recursion.lox"],
+    "args": ["test/function/parameters.lox"],
     "build": {
       "command": "zig",
-      "args": ["build", "-Dlog-gc", "-Dstress-gc"]
-    }
-  },
-  {
-    "label": "Limit",
-    "adapter": "CodeLLDB",
-    "program": "./zig-out/bin/zlox",
-    "request": "launch",
-    "cwd": "$ZED_WORKTREE_ROOT",
-    "args": ["test/limit/too_many_upvalues.lox"],
-    "build": {
-      "command": "zig",
+      // "args": ["build", "-Dlog-gc", "-Dstress-gc", "-Dtrace-execution"]
       "args": ["build", "-Dtrace-execution"]
     }
   },
