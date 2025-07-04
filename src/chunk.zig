@@ -51,17 +51,32 @@ pub const OpCode = enum(u8) {
 
 const CONSTANT_MAX = std.math.maxInt(u8) + 1;
 
+const LineEncoding = struct {
+    start: usize,
+    line: usize,
+
+    fn order(context: usize, item: @This()) std.math.Order {
+        if (context < item.start) {
+            return .lt;
+        } else if (context > item.start) {
+            return .gt;
+        } else {
+            return .eq;
+        }
+    }
+};
+
 pub const Chunk = @This();
 code: std.ArrayList(u8),
 constants: std.ArrayList(Value),
-lines: std.ArrayList(usize),
+lines: std.ArrayList(LineEncoding),
 allocator: Allocator,
 
 pub fn init(allocator: Allocator) Chunk {
     return Chunk{
         .constants = std.ArrayList(Value).init(allocator),
         .code = std.ArrayList(u8).init(allocator),
-        .lines = std.ArrayList(usize).init(allocator),
+        .lines = std.ArrayList(LineEncoding).init(allocator),
         .allocator = allocator,
     };
 }
@@ -74,7 +89,11 @@ pub fn deinit(self: *Chunk) void {
 
 pub fn writeByte(self: *Chunk, byte: u8, line: usize) !void {
     try self.code.append(byte);
-    try self.lines.append(line);
+    const current_line: LineEncoding = self.lines.getLastOrNull() orelse .{ .start = 0, .line = 0 };
+    if (line != current_line.line) try self.lines.append(.{
+        .start = self.code.items.len - 1,
+        .line = line,
+    });
 }
 
 pub fn writeOpCode(self: *Chunk, oc: OpCode, line: usize) !void {
@@ -111,16 +130,29 @@ pub fn constAt(self: *Chunk, offset: u8) Value {
     return self.constants.items[offset];
 }
 
+pub fn lineOfByteAt(self: *Chunk, offset: usize) usize {
+    const line_idx = std.sort.upperBound(LineEncoding, self.lines.items, offset, LineEncoding.order);
+    return self.lines.items[line_idx - 1].line;
+}
+
 test "Chunk write byte and line tracking" {
     var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
     try c.writeByte(42, 123);
+    try c.writeByte(43, 123);
+    try c.writeByte(44, 124);
 
-    try testing.expectEqual(1, c.code.items.len);
+    try testing.expectEqual(3, c.code.items.len);
     try testing.expectEqual(42, c.code.items[0]);
-    try testing.expectEqual(1, c.lines.items.len);
-    try testing.expectEqual(123, c.lines.items[0]);
+    try testing.expectEqual(43, c.code.items[1]);
+    try testing.expectEqual(44, c.code.items[2]);
+    try testing.expectEqual(2, c.lines.items.len);
+    try testing.expectEqual(LineEncoding{ .start = 0, .line = 123 }, c.lines.items[0]);
+    try testing.expectEqual(LineEncoding{ .start = 2, .line = 124 }, c.lines.items[1]);
+    try testing.expectEqual(123, c.lineOfByteAt(0));
+    try testing.expectEqual(123, c.lineOfByteAt(1));
+    try testing.expectEqual(124, c.lineOfByteAt(2));
 }
 
 test "Chunk write OpCode" {
@@ -131,7 +163,7 @@ test "Chunk write OpCode" {
 
     try testing.expectEqual(1, c.code.items.len);
     try testing.expectEqual(@intFromEnum(OpCode.RETURN), c.code.items[0]);
-    try testing.expectEqual(456, c.lines.items[0]);
+    try testing.expectEqual(456, c.lineOfByteAt(0));
 }
 
 test "Chunk add constant" {
@@ -175,7 +207,6 @@ test "Chunk multiple operations sequence" {
     var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
-    // Write a sequence of operations like you might in real code
     try c.writeOpCode(.RETURN, 1);
     const val: Value = .{ .Number = 42.0 };
     try c.writeConst(try c.addConstant(val), 2);
@@ -187,7 +218,7 @@ test "Chunk multiple operations sequence" {
     try testing.expectEqual(0, c.code.items[2]); // Constant index
 
     // Verify line numbers
-    try testing.expectEqual(1, c.lines.items[0]);
-    try testing.expectEqual(2, c.lines.items[1]);
-    try testing.expectEqual(2, c.lines.items[2]);
+    try testing.expectEqual(1, c.lineOfByteAt(0));
+    try testing.expectEqual(2, c.lineOfByteAt(1));
+    try testing.expectEqual(2, c.lineOfByteAt(2));
 }

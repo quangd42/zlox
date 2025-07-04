@@ -16,9 +16,8 @@ pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
 pub fn disassembleInstruction(c: *Chunk, offset: usize) usize {
     print("{d:0>4} ", .{offset});
 
-    const lines = c.lines.items;
-    if (offset == 0 or lines[offset] != lines[offset - 1]) {
-        print("{d:>4} ", .{lines[offset]});
+    if (offset == 0 or c.lineOfByteAt(offset) != c.lineOfByteAt(offset - 1)) {
+        print("{d:>4} ", .{c.lineOfByteAt(offset)});
     } else {
         print("   | ", .{});
     }

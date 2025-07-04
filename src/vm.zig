@@ -328,7 +328,7 @@ fn runtimeError(self: *VM, comptime fmt: []const u8, args: anytype) !void {
         const frame = self.frames.items[i - 1];
         const function = frame.closure.function;
         const instruction = frame.ip - 1;
-        print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
+        print("[line {d}] in ", .{function.chunk.lineOfByteAt(instruction)});
         if (function.name) |obj| {
             print("{s}()\n", .{obj.chars});
         } else {
