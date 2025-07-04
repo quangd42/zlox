@@ -22,6 +22,7 @@ pub const OpCode = enum(u8) {
     SET_PROPERTY,
     GET_SUPER,
     EQUAL,
+    NOT_EQUAL,
     GREATER,
     GREATER_EQUAL,
     LESS,
@@ -50,66 +51,65 @@ pub const OpCode = enum(u8) {
 
 const CONSTANT_MAX = std.math.maxInt(u8) + 1;
 
-pub const Chunk = struct {
-    code: std.ArrayList(u8),
-    constants: std.ArrayList(Value),
-    lines: std.ArrayList(usize),
-    allocator: Allocator,
+pub const Chunk = @This();
+code: std.ArrayList(u8),
+constants: std.ArrayList(Value),
+lines: std.ArrayList(usize),
+allocator: Allocator,
 
-    pub fn init(allocator: Allocator) Chunk {
-        return Chunk{
-            .constants = std.ArrayList(Value).init(allocator),
-            .code = std.ArrayList(u8).init(allocator),
-            .lines = std.ArrayList(usize).init(allocator),
-            .allocator = allocator,
-        };
-    }
+pub fn init(allocator: Allocator) Chunk {
+    return Chunk{
+        .constants = std.ArrayList(Value).init(allocator),
+        .code = std.ArrayList(u8).init(allocator),
+        .lines = std.ArrayList(usize).init(allocator),
+        .allocator = allocator,
+    };
+}
 
-    pub fn deinit(self: *Chunk) void {
-        self.code.deinit();
-        self.constants.deinit();
-        self.lines.deinit();
-    }
+pub fn deinit(self: *Chunk) void {
+    self.code.deinit();
+    self.constants.deinit();
+    self.lines.deinit();
+}
 
-    pub fn writeByte(self: *Chunk, byte: u8, line: usize) !void {
-        try self.code.append(byte);
-        try self.lines.append(line);
-    }
+pub fn writeByte(self: *Chunk, byte: u8, line: usize) !void {
+    try self.code.append(byte);
+    try self.lines.append(line);
+}
 
-    pub fn writeOpCode(self: *Chunk, oc: OpCode, line: usize) !void {
-        try self.writeByte(@intFromEnum(oc), line);
-    }
+pub fn writeOpCode(self: *Chunk, oc: OpCode, line: usize) !void {
+    try self.writeByte(@intFromEnum(oc), line);
+}
 
-    pub fn addConstant(self: *Chunk, val: Value) !u8 {
-        // Check if the constant already exists in chunk.
-        // Linear search is adequate for 255 items
-        // Unsure why the book doesn't want this - presumably for performance
-        for (self.constants.items, 0..) |constant, i| {
-            if (constant.eql(val)) {
-                return @intCast(i);
-            }
+pub fn addConstant(self: *Chunk, val: Value) !u8 {
+    // Check if the constant already exists in chunk.
+    // Linear search is adequate for 255 items
+    // Unsure why the book doesn't want this - presumably for performance
+    for (self.constants.items, 0..) |constant, i| {
+        if (constant.eql(val)) {
+            return @intCast(i);
         }
-
-        if (self.constants.items.len >= CONSTANT_MAX) return error.OutOfMemory;
-        try self.constants.append(val);
-        return @intCast(self.constants.items.len - 1);
     }
 
-    pub fn writeConst(self: *Chunk, constant_idx: u8, line: usize) !void {
-        try self.writeOpCode(.CONSTANT, line);
-        try self.writeByte(constant_idx, line);
-    }
+    if (self.constants.items.len >= CONSTANT_MAX) return error.ConstantTooLarge;
+    try self.constants.append(val);
+    return @intCast(self.constants.items.len - 1);
+}
 
-    pub fn byteAt(self: *Chunk, offset: usize) u8 {
-        std.debug.assert(offset <= self.code.items.len);
-        return self.code.items[offset];
-    }
+pub fn writeConst(self: *Chunk, constant_idx: u8, line: usize) !void {
+    try self.writeOpCode(.CONSTANT, line);
+    try self.writeByte(constant_idx, line);
+}
 
-    pub fn constAt(self: *Chunk, offset: u8) Value {
-        std.debug.assert(offset <= self.constants.items.len);
-        return self.constants.items[offset];
-    }
-};
+pub fn byteAt(self: *Chunk, offset: usize) u8 {
+    std.debug.assert(offset <= self.code.items.len);
+    return self.code.items[offset];
+}
+
+pub fn constAt(self: *Chunk, offset: u8) Value {
+    std.debug.assert(offset <= self.constants.items.len);
+    return self.constants.items[offset];
+}
 
 test "Chunk write byte and line tracking" {
     var c = Chunk.init(testing.allocator);

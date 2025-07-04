@@ -1,10 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Chunk = @import("chunk.zig").Chunk;
+const Chunk = @import("chunk.zig");
 const debug = @import("debug.zig");
-const vm = @import("vm.zig");
-const VM = vm.VM;
+const VM = @import("vm.zig");
 
 const DEBUGGING = @import("builtin").mode == .Debug;
 

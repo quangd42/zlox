@@ -1,4 +1,5 @@
 benchmark/
+benchmark2/
 scanning/
 expressions/
 for/closure_in_body.lox

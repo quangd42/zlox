@@ -1,9 +1,8 @@
 const std = @import("std");
 const print = std.debug.print;
 
-const _chunk = @import("chunk.zig");
-const Chunk = _chunk.Chunk;
-const OpCode = _chunk.OpCode;
+const Chunk = @import("chunk.zig");
+const OpCode = Chunk.OpCode;
 
 pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
     print("== {s} ==\n", .{name});

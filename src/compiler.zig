@@ -5,18 +5,16 @@ const testing = std.testing;
 
 const TRACE_EXECUTION = @import("debug").@"trace-execution";
 
-const _chunk = @import("chunk.zig");
-const Chunk = _chunk.Chunk;
-const OpCode = _chunk.OpCode;
+const Chunk = @import("chunk.zig");
+const OpCode = Chunk.OpCode;
+const debug = @import("debug.zig");
 const Obj = @import("obj.zig");
 const FunctionType = Obj.FunctionType;
-const _scanner = @import("scanner.zig");
-const Scanner = _scanner.Scanner;
-const Token = _scanner.Token;
-const TokenType = _scanner.TokenType;
-const debug = @import("debug.zig");
+const Scanner = @import("scanner.zig");
+const Token = Scanner.Token;
+const TokenType = Scanner.TokenType;
 const Value = @import("value.zig").Value;
-const VM = @import("vm.zig").VM;
+const VM = @import("vm.zig");
 
 const DEBUGGING = @import("builtin").mode == .Debug;
 
@@ -763,9 +761,8 @@ test "test parse rule table" {
 
 fn number(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
-    const val = std.fmt.parseFloat(f64, self.parser.previous.lexeme) catch |e| {
-        print("{any}: ", .{e});
-        @panic("failed to parse number literal.");
+    const val = std.fmt.parseFloat(f64, self.parser.previous.lexeme) catch {
+        return self.err("failed to parse number literal.");
     };
     try self.emitConstant(.{ .Number = val });
 }
@@ -800,10 +797,7 @@ fn binary(self: *Self, can_assign: bool) Error!void {
         .STAR => self.emitOpCode(.MULTIPLY),
         .SLASH => self.emitOpCode(.DIVIDE),
         .EQUAL_EQUAL => self.emitOpCode(.EQUAL),
-        .BANG_EQUAL => {
-            try self.emitOpCode(.EQUAL);
-            try self.emitOpCode(.NOT);
-        },
+        .BANG_EQUAL => try self.emitOpCode(.NOT_EQUAL),
         .GREATER => self.emitOpCode(.GREATER),
         .GREATER_EQUAL => self.emitOpCode(.GREATER_EQUAL),
         .LESS => self.emitOpCode(.LESS),

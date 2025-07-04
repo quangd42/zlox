@@ -17,7 +17,7 @@ pub const Value = union(Type) {
     Obj: *Obj,
 
     pub fn format(
-        self: @This(),
+        self: Value,
         comptime _: []const u8,
         _: std.fmt.FormatOptions,
         writer: anytype,

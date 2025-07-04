@@ -4,10 +4,10 @@ const testing = std.testing;
 
 const LOG_GC = @import("debug").@"log-gc";
 
-const Chunk = @import("chunk.zig").Chunk;
-const Table = @import("table.zig").Table;
+const Chunk = @import("chunk.zig");
+const Table = @import("table.zig");
 const Value = @import("value.zig").Value;
-const VM = @import("vm.zig").VM;
+const VM = @import("vm.zig");
 
 const Obj = @This();
 type: Type,
@@ -234,6 +234,8 @@ test "fnv hash" {
 
 pub const Upvalue = struct {
     obj: Obj,
+    // location could point to the stack or the heap (which is .closed right in this obj)
+    // hence the multi-item ptr to avoid multiple ptrCast
     location: [*]Value,
     closed: Value,
     next: ?*Self = null,
