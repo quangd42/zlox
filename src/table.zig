@@ -128,13 +128,13 @@ test "table ops" {
     var deleted = table.delete(key1);
     try testing.expectEqual(false, deleted);
     // set key
-    const set_key = try table.set(key1, .{ .Bool = true });
+    const set_key = try table.set(key1, .from(true));
     try testing.expect(set_key);
     try testing.expectEqual(1, table.count);
     // get back
     got = table.get(key1);
     try testing.expect(got != null);
-    try testing.expectEqual(Value{ .Bool = true }, got.?);
+    try testing.expectEqual(Value.from(true), got.?);
     // delete invalid key
     deleted = table.delete(key2);
     try testing.expect(!deleted);
@@ -176,16 +176,16 @@ test "rewrite key" {
     const key3 = try Obj.String.init(vm, "world");
     const key4 = try key2.concat(vm, key3);
     const current_count = vm.globals.count;
-    var set_key = try vm.globals.set(key1, .{ .Number = 1 });
+    var set_key = try vm.globals.set(key1, .from(1));
     try testing.expect(set_key);
     try testing.expectEqual(current_count + 1, vm.globals.count);
-    set_key = try vm.globals.set(key4, .{ .Bool = true });
+    set_key = try vm.globals.set(key4, .from(true));
     try testing.expect(!set_key);
     try testing.expectEqual(current_count + 1, vm.globals.count);
     var got = vm.globals.get(key1);
     try testing.expect(got != null);
-    try testing.expectEqual(Value{ .Bool = true }, got.?);
+    try testing.expectEqual(Value.from(true), got.?);
     got = vm.globals.get(key4);
     try testing.expect(got != null);
-    try testing.expectEqual(Value{ .Bool = true }, got.?);
+    try testing.expectEqual(Value.from(true), got.?);
 }

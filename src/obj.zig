@@ -84,7 +84,7 @@ pub const Function = struct {
     const Self = @This();
     pub fn init(vm: *VM) !*Self {
         const out = try allocateObj(vm, .Function);
-        try vm.push(.{ .Obj = &out.obj });
+        try vm.push(.from(&out.obj));
         defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
@@ -163,14 +163,14 @@ pub const String = struct {
 
     fn allocateString(vm: *VM, chars: []const u8, hash: u32) !*String {
         const out = try allocateObj(vm, .String);
-        try vm.push(.{ .Obj = &out.obj });
+        try vm.push(.from(&out.obj));
         defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
             .hash = hash,
             .chars = chars,
         };
-        _ = try vm.strings.set(out, .{ .Nil = {} });
+        _ = try vm.strings.set(out, Value.Nil);
         return out;
     }
 
@@ -244,7 +244,7 @@ pub const Upvalue = struct {
 
     pub fn init(vm: *VM, slot: [*]Value) !*Self {
         const out = try allocateObj(vm, .Upvalue);
-        // try vm.push(.{ .Obj = &out.obj });
+        // try vm.push(.from(&out.obj));
         // defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
@@ -280,7 +280,7 @@ pub const Closure = struct {
         const upvalues = try vm.allocator.alloc(?*Upvalue, function.upvalue_count);
         for (upvalues) |*upvalue| upvalue.* = null;
         const out = try allocateObj(vm, .Closure);
-        // try vm.push(.{ .Obj = &out.obj });
+        // try vm.push(.from(&out.obj));
         // defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
@@ -314,7 +314,7 @@ pub const Class = struct {
 
     pub fn init(vm: *VM, name: *String) !*Self {
         const out = try allocateObj(vm, .Class);
-        // try vm.push(.{ .Obj = &out.obj });
+        // try vm.push(.from(&out.obj));
         // defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
@@ -361,7 +361,7 @@ pub const Instance = struct {
 
     pub fn init(vm: *VM, class: *Class) !*Self {
         const out = try allocateObj(vm, .Instance);
-        try vm.push(.{ .Obj = &out.obj });
+        try vm.push(.from(&out.obj));
         defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,
@@ -396,7 +396,7 @@ pub const BoundMethod = struct {
 
     pub fn init(vm: *VM, receiver: Value, method: *Closure) !*Self {
         const out = try allocateObj(vm, .BoundMethod);
-        // try vm.push(.{ .Obj = &out.obj });
+        // try vm.push(.from(&out.obj));
         // defer _ = vm.pop();
         out.* = .{
             .obj = out.obj,

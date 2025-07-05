@@ -244,9 +244,9 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
 
 fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
     const str_obj = try Obj.String.init(self.vm, lexeme);
-    try self.vm.push(.{ .Obj = &str_obj.obj });
+    try self.vm.push(.from(&str_obj.obj));
     defer _ = self.vm.pop();
-    return self.makeConstant(.{ .Obj = &str_obj.obj });
+    return self.makeConstant(.from(&str_obj.obj));
 }
 
 fn addLocal(self: *Self, lexeme: []const u8) !void {
@@ -539,7 +539,7 @@ fn function(self: *Self, fun_type: FunctionType) !void {
         self.errorAtCurrent("Expect '{' before function body.");
     try self.block();
     const fun = try self.endCompiler();
-    const const_idx = try self.makeConstant(.{ .Obj = &fun.obj });
+    const const_idx = try self.makeConstant(.from(&fun.obj));
     try self.emitOpCode(.CLOSURE);
     try self.emitByte(const_idx);
 
@@ -621,8 +621,8 @@ test "compiler init & parse simple expression" {
     try testing.expectEqual(null, fun.name);
     try testing.expectEqual(0, fun.arity);
     try testing.expectEqual(2, fun.chunk.constants.items.len);
-    try testing.expectEqual(Value{ .Number = 1 }, fun.chunk.constants.items[0]);
-    try testing.expectEqual(Value{ .Number = 275 }, fun.chunk.constants.items[1]);
+    try testing.expectEqual(Value.from(1), fun.chunk.constants.items[0]);
+    try testing.expectEqual(Value.from(275), fun.chunk.constants.items[1]);
     try testing.expectEqual(OpCode.ADD, @as(OpCode, @enumFromInt(fun.chunk.code.items[4])));
 }
 
@@ -764,7 +764,7 @@ fn number(self: *Self, can_assign: bool) Error!void {
     const val = std.fmt.parseFloat(f64, self.parser.previous.lexeme) catch {
         return self.err("failed to parse number literal.");
     };
-    try self.emitConstant(.{ .Number = val });
+    try self.emitConstant(.from(val));
 }
 
 fn grouping(self: *Self, can_assign: bool) Error!void {
@@ -849,7 +849,7 @@ fn string(self: *Self, can_assign: bool) Error!void {
     _ = can_assign;
     const prev = &self.parser.previous;
     const str_obj = try Obj.String.init(self.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
-    const val: Value = .{ .Obj = &str_obj.obj };
+    const val: Value = .from(&str_obj.obj);
     try self.vm.push(val);
     defer _ = self.vm.pop();
     try self.emitConstant(val);

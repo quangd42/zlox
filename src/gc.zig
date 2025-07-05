@@ -146,20 +146,17 @@ fn sweep(self: *GC) void {
 
 fn markObj(self: *GC, obj: *Obj) !void {
     if (obj.is_marked) return;
-    if (LOG_GC) print("{*} mark {}\n", .{ obj, Value{ .Obj = obj } });
+    if (LOG_GC) print("{*} mark {}\n", .{ obj, .from(obj) });
     obj.is_marked = true;
     try self.vm.gray_stack.append(obj);
 }
 
 fn markValue(self: *GC, value: *Value) !void {
-    switch (value.*) {
-        .Obj => |obj| try self.markObj(obj),
-        else => {},
-    }
+    if (value.is(.Obj)) try self.markObj(value.as(.Obj).?);
 }
 
 fn blackenObj(self: *GC, obj: *Obj) !void {
-    if (LOG_GC) print("{*} blacken {}\n", .{ obj, Value{ .Obj = obj } });
+    if (LOG_GC) print("{*} blacken {}\n", .{ obj, .from(obj) });
     switch (obj.type) {
         .Native, .String => {},
         .Upvalue => try self.markValue(&obj.as(.Upvalue).closed),

@@ -128,10 +128,10 @@ fn interpret(self: *VM, source: []const u8) !void {
     self.compiler = try Compiler.init(self, source);
     const function = self.compiler.?.compile() catch return Error.CompileError;
 
-    try self.push(.{ .Obj = &function.obj });
+    try self.push(.from(&function.obj));
     const closure = try Obj.Closure.init(self, function);
     _ = self.pop();
-    try self.push(.{ .Obj = &closure.obj });
+    try self.push(.from(&closure.obj));
     try self.call(closure, 0);
 
     return self.run();
@@ -153,8 +153,8 @@ fn run(self: *VM) !void {
         switch (instruction) {
             .CONSTANT => try self.push(self.readConstant()),
             .NIL => try self.push(Value.Nil),
-            .TRUE => try self.push(.{ .Bool = true }),
-            .FALSE => try self.push(.{ .Bool = false }),
+            .TRUE => try self.push(.from(true)),
+            .FALSE => try self.push(.from(false)),
             .POP => _ = self.pop(),
             .GET_LOCAL => try self.push(self.frameSlot(frame, self.readByte())[0]),
             .SET_LOCAL => self.frameSlot(frame, self.readByte())[0] = self.peek(0),
@@ -234,7 +234,7 @@ fn run(self: *VM) !void {
             .SUBTRACT => try self.binaryOp(.SUBTRACT),
             .MULTIPLY => try self.binaryOp(.MULTIPLY),
             .DIVIDE => try self.binaryOp(.DIVIDE),
-            .NOT => try self.push(.{ .Bool = self.pop().isFalsey() }),
+            .NOT => try self.push(.from(self.pop().isFalsey())),
             .NEGATE => try self.negateOp(),
             .PRINT => std.io.getStdOut().writer().print("{}\n", .{self.pop()}) catch {
                 return Error.RuntimeError;
@@ -276,7 +276,7 @@ fn run(self: *VM) !void {
             .CLOSURE => {
                 const function = self.readConstant().asObj(.Function).?;
                 const closure = try Obj.Closure.init(self, function);
-                try self.push(.{ .Obj = &closure.obj });
+                try self.push(.from(&closure.obj));
                 // closure.upvalues was inited with the correct amount of upvalue slots
                 for (closure.upvalues) |*upvalue| {
                     const is_local = self.readByte();
@@ -307,7 +307,7 @@ fn run(self: *VM) !void {
             },
             .CLASS => {
                 const class = try Obj.Class.init(self, self.readString());
-                try self.push(.{ .Obj = &class.obj });
+                try self.push(.from(&class.obj));
             },
             .INHERIT => {
                 const superclass = self.peek(1).asObj(.Class) orelse
@@ -398,12 +398,9 @@ inline fn frameSlot(self: *VM, current_frame: *CallFrame, slot_idx: i16) [*]Valu
 }
 
 fn negateOp(self: *VM) !void {
-    switch (self.pop()) {
-        .Number => |val| try self.push(.{ .Number = -val }),
-        else => {
-            return self.runtimeError("Operand must be a number.", .{});
-        },
-    }
+    const num = self.pop().as(.Number) orelse
+        return self.runtimeError("Operand must be a number.", .{});
+    try self.push(.from(-num));
 }
 
 fn binaryOp(self: *VM, comptime op: OpCode) !void {
@@ -413,14 +410,14 @@ fn binaryOp(self: *VM, comptime op: OpCode) !void {
         return self.runtimeError("Operands must be numbers.", .{});
 
     try self.push(switch (op) {
-        .ADD => .{ .Number = a + b },
-        .SUBTRACT => .{ .Number = a - b },
-        .MULTIPLY => .{ .Number = a * b },
-        .DIVIDE => .{ .Number = a / b },
-        .GREATER => .{ .Bool = a > b },
-        .GREATER_EQUAL => .{ .Bool = a >= b },
-        .LESS => .{ .Bool = a < b },
-        .LESS_EQUAL => .{ .Bool = a <= b },
+        .ADD => .from(a + b),
+        .SUBTRACT => .from(a - b),
+        .MULTIPLY => .from(a * b),
+        .DIVIDE => .from(a / b),
+        .GREATER => .from(a > b),
+        .GREATER_EQUAL => .from(a >= b),
+        .LESS => .from(a < b),
+        .LESS_EQUAL => .from(a <= b),
         else => unreachable,
     });
 }
@@ -433,13 +430,13 @@ fn concatenate(self: *VM) !void {
     const b_str = b.asObj(.String) orelse return Error.RuntimeError;
     const a_str = a.asObj(.String) orelse return Error.RuntimeError;
     const out = try a_str.concat(self, b_str);
-    try self.push(.{ .Obj = &out.obj });
+    try self.push(.from(&out.obj));
 }
 
 fn equalOp(self: *VM, is_equal: bool) !void {
     const b = self.pop();
     const a = self.pop();
-    try self.push(.{ .Bool = is_equal == a.eql(b) });
+    try self.push(.from(is_equal == a.eql(b)));
 }
 
 fn defineNative(self: *VM, name: []const u8, function: Obj.NativeFn) !void {
@@ -447,7 +444,7 @@ fn defineNative(self: *VM, name: []const u8, function: Obj.NativeFn) !void {
     // the vm is fully initialized, so no need to dance around the GC here.
     const str = try Obj.String.init(self, name);
     const fun = try Obj.Native.init(self, function);
-    _ = try self.globals.set(str, .{ .Obj = &fun.obj });
+    _ = try self.globals.set(str, .from(&fun.obj));
 }
 
 fn call(self: *VM, closure: *Obj.Closure, arg_count: u8) !void {
@@ -466,34 +463,34 @@ fn call(self: *VM, closure: *Obj.Closure, arg_count: u8) !void {
 }
 
 fn callValue(self: *VM, callee: Value, arg_count: u8) !void {
-    return switch (callee) {
-        .Obj => |callee_obj| switch (callee_obj.type) {
-            .BoundMethod => {
-                const bound = callee_obj.as(.BoundMethod);
-                const callee_idx = self.stack.items.len - arg_count - 1;
-                self.stack.items[callee_idx] = bound.receiver;
-                try self.call(bound.method, arg_count);
-            },
-            .Class => {
-                const class = callee_obj.as(.Class);
-                const instance = try Obj.Instance.init(self, class);
-                const callee_idx = self.stack.items.len - arg_count - 1; // index of the callee Value on the stack
-                self.stack.items[callee_idx] = .{ .Obj = &instance.obj };
-                const maybe_init = class.methods.get(self.init_string);
-                if (maybe_init) |init_val| {
-                    try self.call(init_val.Obj.as(.Closure), arg_count);
-                } else if (arg_count != 0)
-                    return self.runtimeError("Expected 0 arguments but got {d}.", .{arg_count});
-            },
-            .Closure => self.call(callee_obj.as(.Closure), arg_count),
-            .Native => {
-                const native = callee_obj.as(.Native).function;
-                const first_arg_idx = self.stack.items.len - arg_count; // index of the first arg Value on the stack
-                const result = native(arg_count, self.stack.items.ptr + first_arg_idx);
-                self.stack.shrinkRetainingCapacity(first_arg_idx - 1);
-                try self.push(result);
-            },
-            else => self.runtimeError("Can only call functions and classes.", .{}),
+    if (!callee.is(.Obj))
+        return self.runtimeError("Can only call functions and classes.", .{});
+    const callee_obj = callee.as(.Obj).?;
+    return switch (callee_obj.type) {
+        .BoundMethod => {
+            const bound = callee_obj.as(.BoundMethod);
+            const callee_idx = self.stack.items.len - arg_count - 1;
+            self.stack.items[callee_idx] = bound.receiver;
+            try self.call(bound.method, arg_count);
+        },
+        .Class => {
+            const class = callee_obj.as(.Class);
+            const instance = try Obj.Instance.init(self, class);
+            const callee_idx = self.stack.items.len - arg_count - 1; // index of the callee Value on the stack
+            self.stack.items[callee_idx] = .from(&instance.obj);
+            const maybe_init = class.methods.get(self.init_string);
+            if (maybe_init) |init_val| {
+                try self.call(init_val.asObj(.Closure).?, arg_count);
+            } else if (arg_count != 0)
+                return self.runtimeError("Expected 0 arguments but got {d}.", .{arg_count});
+        },
+        .Closure => self.call(callee_obj.as(.Closure), arg_count),
+        .Native => {
+            const native = callee_obj.as(.Native).function;
+            const first_arg_idx = self.stack.items.len - arg_count; // index of the first arg Value on the stack
+            const result = native(arg_count, self.stack.items.ptr + first_arg_idx);
+            self.stack.shrinkRetainingCapacity(first_arg_idx - 1);
+            try self.push(result);
         },
         else => self.runtimeError("Can only call functions and classes.", .{}),
     };
@@ -560,7 +557,7 @@ fn bindMethod(self: *VM, class: *Obj.Class, name: *Obj.String) !void {
         return self.runtimeError("Undefined property '{s}'.", .{name.chars});
     const bound = try Obj.BoundMethod.init(self, self.peek(0), method.asObj(.Closure).?);
     _ = self.pop();
-    try self.push(.{ .Obj = &bound.obj });
+    try self.push(.from(&bound.obj));
 }
 
 test "vm deinit" {
@@ -578,5 +575,5 @@ test "vm deinit" {
 fn clockNative(arg_count: usize, args: [*]const Value) Value {
     _ = arg_count;
     _ = args;
-    return .{ .Number = @floatFromInt(std.time.timestamp()) };
+    return .from(@as(f64, @floatFromInt(std.time.timestamp())));
 }

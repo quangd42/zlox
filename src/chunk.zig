@@ -170,19 +170,19 @@ test "Chunk add constant" {
     var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
-    const val: Value = .{ .Number = 3.14 };
+    const val: Value = .from(3.14);
     const idx = try c.addConstant(val);
 
     try testing.expectEqual(0, idx);
     try testing.expectEqual(1, c.constants.items.len);
-    try testing.expectEqual(3.14, c.constants.items[0].Number);
+    try testing.expectEqual(val, c.constants.items[0]);
 }
 
 test "Chunk write constant - small index" {
     var c = Chunk.init(testing.allocator);
     defer c.deinit();
 
-    const val: Value = .{ .Number = 2.71 };
+    const val: Value = .from(2.71);
     const idx = try c.addConstant(val);
     try c.writeConst(idx, 789);
 
@@ -208,7 +208,7 @@ test "Chunk multiple operations sequence" {
     defer c.deinit();
 
     try c.writeOpCode(.RETURN, 1);
-    const val: Value = .{ .Number = 42.0 };
+    const val: Value = .from(42.0);
     try c.writeConst(try c.addConstant(val), 2);
 
     // Verify the byte sequence
