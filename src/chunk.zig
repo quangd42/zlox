@@ -67,30 +67,30 @@ const LineEncoding = struct {
 };
 
 pub const Chunk = @This();
-code: std.ArrayList(u8),
-constants: std.ArrayList(Value),
-lines: std.ArrayList(LineEncoding),
+code: std.ArrayListUnmanaged(u8),
+constants: std.ArrayListUnmanaged(Value),
+lines: std.ArrayListUnmanaged(LineEncoding),
 allocator: Allocator,
 
 pub fn init(allocator: Allocator) Chunk {
     return Chunk{
-        .constants = std.ArrayList(Value).init(allocator),
-        .code = std.ArrayList(u8).init(allocator),
-        .lines = std.ArrayList(LineEncoding).init(allocator),
+        .constants = .empty,
+        .code = .empty,
+        .lines = .empty,
         .allocator = allocator,
     };
 }
 
 pub fn deinit(self: *Chunk) void {
-    self.code.deinit();
-    self.constants.deinit();
-    self.lines.deinit();
+    self.code.deinit(self.allocator);
+    self.constants.deinit(self.allocator);
+    self.lines.deinit(self.allocator);
 }
 
 pub fn writeByte(self: *Chunk, byte: u8, line: usize) !void {
-    try self.code.append(byte);
+    try self.code.append(self.allocator, byte);
     const current_line: LineEncoding = self.lines.getLastOrNull() orelse .{ .start = 0, .line = 0 };
-    if (line != current_line.line) try self.lines.append(.{
+    if (line != current_line.line) try self.lines.append(self.allocator, .{
         .start = self.code.items.len - 1,
         .line = line,
     });
@@ -111,7 +111,7 @@ pub fn addConstant(self: *Chunk, val: Value) !u8 {
     }
 
     if (self.constants.items.len >= CONSTANT_MAX) return error.ConstantTooLarge;
-    try self.constants.append(val);
+    try self.constants.append(self.allocator, val);
     return @intCast(self.constants.items.len - 1);
 }
 

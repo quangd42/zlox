@@ -148,7 +148,7 @@ fn markObj(self: *GC, obj: *Obj) !void {
     if (obj.is_marked) return;
     if (LOG_GC) print("{*} mark {}\n", .{ obj, .from(obj) });
     obj.is_marked = true;
-    try self.vm.gray_stack.append(obj);
+    try self.vm.gray_stack.append(self.backing_allocator, obj);
 }
 
 fn markValue(self: *GC, value: *Value) !void {

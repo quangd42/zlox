@@ -170,7 +170,7 @@ pub const String = struct {
             .hash = hash,
             .chars = chars,
         };
-        _ = try vm.strings.set(out, Value.Nil);
+        _ = try vm.strings.set(vm.allocator, out, Value.Nil);
         return out;
     }
 
@@ -319,14 +319,14 @@ pub const Class = struct {
         out.* = .{
             .obj = out.obj,
             .name = name,
-            .methods = .init(vm.allocator),
+            .methods = .empty,
         };
         return out;
     }
 
     pub fn deinit(self: *Self, vm: *VM) void {
         // .name will be collected by gc
-        self.methods.deinit();
+        self.methods.deinit(vm.allocator);
         vm.allocator.destroy(self);
     }
 
@@ -366,14 +366,14 @@ pub const Instance = struct {
         out.* = .{
             .obj = out.obj,
             .class = class,
-            .fields = .init(vm.allocator),
+            .fields = .empty,
         };
         return out;
     }
 
     pub fn deinit(self: *Self, vm: *VM) void {
         // .class will be collected by gc
-        self.fields.deinit();
+        self.fields.deinit(vm.allocator);
         vm.allocator.destroy(self);
     }
 

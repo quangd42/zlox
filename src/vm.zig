@@ -27,15 +27,15 @@ const CallFrame = struct {
 
 pub const VM = @This();
 
-frames: std.ArrayList(CallFrame),
-stack: std.ArrayList(Value),
+frames: std.ArrayListUnmanaged(CallFrame),
+stack: std.ArrayListUnmanaged(Value),
 objects: ?*Obj = null,
 open_upvalues: ?*Obj.Upvalue = null,
 init_string: *Obj.String,
 strings: Table,
 globals: Table,
 compiler: ?Compiler,
-gray_stack: std.ArrayList(*Obj),
+gray_stack: std.ArrayListUnmanaged(*Obj),
 bytes_allocated: usize = 0,
 next_gc: usize = 1024 * 1024,
 gc: GC,
@@ -45,19 +45,19 @@ pub fn init(backing_allocator: Allocator) !*VM {
     var vm = try backing_allocator.create(VM);
     vm.* = .{
         // init memory manager
-        .gc = GC.init(backing_allocator, vm),
-        .gray_stack = std.ArrayList(*Obj).init(backing_allocator),
+        .gc = .init(backing_allocator, vm),
+        .gray_stack = .empty,
         // managed memory
         .allocator = vm.gc.allocator(),
         .compiler = null,
-        .globals = Table.init(vm.allocator),
-        .strings = Table.init(vm.allocator),
+        .globals = .empty,
+        .strings = .empty,
         .open_upvalues = null,
         .objects = null,
-        .frames = std.ArrayList(CallFrame).init(vm.allocator),
+        .frames = .empty,
         // pre allocate enough memory for the stack to avoid triggering gc
         // when using the stack for keeping other objects connected
-        .stack = try std.ArrayList(Value).initCapacity(vm.allocator, 64),
+        .stack = try .initCapacity(vm.allocator, 64),
         // init_string MUST be initialized after the stack
         .init_string = try .init(vm, "init"),
     };
@@ -68,11 +68,11 @@ pub fn init(backing_allocator: Allocator) !*VM {
 }
 
 pub fn deinit(vm: *VM) void {
-    vm.strings.deinit();
-    vm.globals.deinit();
-    vm.stack.deinit();
-    vm.frames.deinit();
-    vm.gray_stack.deinit();
+    vm.strings.deinit(vm.allocator);
+    vm.globals.deinit(vm.allocator);
+    vm.stack.deinit(vm.allocator);
+    vm.frames.deinit(vm.allocator);
+    vm.gray_stack.deinit(vm.allocator);
     var object = vm.objects;
     while (object) |obj| {
         const next = obj.next;
@@ -167,12 +167,12 @@ fn run(self: *VM) !void {
             },
             .DEFINE_GLOBAL => {
                 const name = self.readString();
-                _ = try self.globals.set(name, self.peek(0));
+                _ = try self.globals.set(self.allocator, name, self.peek(0));
                 _ = self.pop(); // see book for why
             },
             .SET_GLOBAL => {
                 const name = self.readString();
-                if (try self.globals.set(name, self.peek(0))) {
+                if (try self.globals.set(self.allocator, name, self.peek(0))) {
                     _ = self.globals.delete(name);
                     return self.runtimeError("Undefined variable '{s}'.", .{name.chars});
                 }
@@ -206,7 +206,7 @@ fn run(self: *VM) !void {
                     return self.runtimeError("Only instances have fields.", .{});
                 };
                 const name = self.readString();
-                _ = try instance.fields.set(name, value);
+                _ = try instance.fields.set(self.allocator, name, value);
                 _ = self.pop(); // value
                 _ = self.pop(); // instance
                 try self.push(value); // push value back
@@ -313,7 +313,7 @@ fn run(self: *VM) !void {
                 const superclass = self.peek(1).asObj(.Class) orelse
                     return self.runtimeError("Superclass must be a class.", .{});
                 const subclass = self.peek(0).asObj(.Class).?;
-                try subclass.methods.addAll(&superclass.methods);
+                try subclass.methods.addAll(self.allocator, &superclass.methods);
                 _ = self.pop(); // subclass
             },
             .METHOD => try self.defineMethod(self.readString()),
@@ -375,7 +375,7 @@ pub fn pop(self: *VM) Value {
 
 pub fn push(self: *VM, val: Value) !void {
     if (self.stack.items.len == STACK_MAX) return error.OutOfMemory;
-    return self.stack.append(val);
+    return self.stack.append(self.allocator, val);
 }
 
 fn resetState(self: *VM) void {
@@ -444,7 +444,7 @@ fn defineNative(self: *VM, name: []const u8, function: Obj.NativeFn) !void {
     // the vm is fully initialized, so no need to dance around the GC here.
     const str = try Obj.String.init(self, name);
     const fun = try Obj.Native.init(self, function);
-    _ = try self.globals.set(str, .from(&fun.obj));
+    _ = try self.globals.set(self.allocator, str, .from(&fun.obj));
 }
 
 fn call(self: *VM, closure: *Obj.Closure, arg_count: u8) !void {
@@ -455,7 +455,7 @@ fn call(self: *VM, closure: *Obj.Closure, arg_count: u8) !void {
     if (self.frames.items.len == FRAME_MAX) {
         return self.runtimeError("Stack overflow.", .{});
     }
-    try self.frames.append(.{
+    try self.frames.append(self.allocator, .{
         .closure = closure,
         .ip = 0,
         .start = self.stack.items.len - arg_count - 1,
@@ -548,7 +548,7 @@ fn closeUpvalues(self: *VM, last: [*]Value) void {
 fn defineMethod(self: *VM, name: *Obj.String) !void {
     const method = self.peek(0);
     const class = self.peek(1).asObj(.Class).?;
-    _ = try class.methods.set(name, method);
+    _ = try class.methods.set(self.allocator, name, method);
     _ = self.pop();
 }
 

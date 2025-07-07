@@ -17,23 +17,19 @@ pub const Table = @This();
 
 count: usize = 0,
 entries: []?Entry,
-allocator: Allocator,
 
-pub fn init(allocator: Allocator) Table {
-    return Table{
-        .entries = &[_]?Entry{},
-        .allocator = allocator,
-    };
-}
+/// A Table containing no entries.
+pub const empty: Table = .{ .entries = &[_]?Entry{} };
 
-pub fn deinit(self: *Table) void {
-    self.allocator.free(self.entries);
+pub fn deinit(self: *Table, gpa: Allocator) void {
+    gpa.free(self.entries);
+    self.* = undefined;
 }
 
 /// returns true if a new entry was added, false otherwise
-pub fn set(self: *Table, key: *Obj.String, value: Value) !bool {
+pub fn set(self: *Table, gpa: Allocator, key: *Obj.String, value: Value) !bool {
     if (self.count + 1 > self.entries.len * MAX_LOAD_PERCENTAGE / 100) {
-        try self.increaseCapacity();
+        try self.increaseCapacity(gpa);
     }
     const entry = findEntry(self.entries, key);
     const is_new = entry.* == null;
@@ -42,10 +38,10 @@ pub fn set(self: *Table, key: *Obj.String, value: Value) !bool {
     return is_new;
 }
 
-pub fn addAll(to: *Table, from: *Table) !void {
+pub fn addAll(to: *Table, gpa: Allocator, from: *Table) !void {
     for (from.entries) |mb_entry| {
         const entry = mb_entry orelse continue;
-        if (entry.key) |k| _ = try to.set(k, entry.value);
+        if (entry.key) |k| _ = try to.set(gpa, k, entry.value);
     }
 }
 
@@ -65,9 +61,9 @@ pub fn delete(self: *Table, key: *Obj.String) bool {
     return true;
 }
 
-fn increaseCapacity(self: *Table) !void {
+fn increaseCapacity(self: *Table, gpa: Allocator) !void {
     const new_cap = if (self.entries.len < 8) 8 else self.entries.len * 2;
-    const entries = try self.allocator.alloc(?Entry, new_cap);
+    const entries = try gpa.alloc(?Entry, new_cap);
     // initialize slice for ease of access later
     for (entries) |*entry| entry.* = null;
 
@@ -80,7 +76,7 @@ fn increaseCapacity(self: *Table) !void {
         self.count += 1;
     }
 
-    self.allocator.free(self.entries);
+    gpa.free(self.entries);
     self.entries = entries;
 }
 
@@ -116,9 +112,10 @@ pub fn findString(self: *Table, chars: []const u8, hash: u32) ?*Obj.String {
 
 test "table ops" {
     var vm = try VM.init(testing.allocator);
+    const gpa = vm.allocator;
     defer vm.deinit();
-    var table = Table.init(testing.allocator);
-    defer table.deinit();
+    var table: Table = .empty;
+    defer table.deinit(gpa);
     const key1 = try Obj.String.init(vm, "key");
     const key2 = try Obj.String.init(vm, "not");
     // get from empty table
@@ -128,7 +125,7 @@ test "table ops" {
     var deleted = table.delete(key1);
     try testing.expectEqual(false, deleted);
     // set key
-    const set_key = try table.set(key1, .from(true));
+    const set_key = try table.set(gpa, key1, .from(true));
     try testing.expect(set_key);
     try testing.expectEqual(1, table.count);
     // get back
@@ -145,11 +142,11 @@ test "table ops" {
     // count should remain 1 because of tombstone
     try testing.expectEqual(1, table.count);
     // force increaseCap to clear tombstone, expect count = 0
-    try table.increaseCapacity();
+    try table.increaseCapacity(gpa);
     try testing.expectEqual(0, table.count);
     // addAll
-    var table2 = Table.init(testing.allocator);
-    try table2.addAll(&table);
+    var table2: Table = .empty;
+    try table2.addAll(gpa, &table);
     for (table2.entries) |mb_entry| {
         const entry = mb_entry orelse continue;
         if (entry.key) |k| {
@@ -170,16 +167,17 @@ test "table ops" {
 
 test "rewrite key" {
     var vm = try VM.init(testing.allocator);
+    const gpa = vm.allocator;
     defer vm.deinit();
     const key1 = try Obj.String.init(vm, "hello world");
     const key2 = try Obj.String.init(vm, "hello ");
     const key3 = try Obj.String.init(vm, "world");
     const key4 = try key2.concat(vm, key3);
     const current_count = vm.globals.count;
-    var set_key = try vm.globals.set(key1, .from(1));
+    var set_key = try vm.globals.set(gpa, key1, .from(1));
     try testing.expect(set_key);
     try testing.expectEqual(current_count + 1, vm.globals.count);
-    set_key = try vm.globals.set(key4, .from(true));
+    set_key = try vm.globals.set(gpa, key4, .from(true));
     try testing.expect(!set_key);
     try testing.expectEqual(current_count + 1, vm.globals.count);
     var got = vm.globals.get(key1);
