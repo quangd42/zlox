@@ -130,8 +130,7 @@ fn interpret(self: *VM, source: []const u8) !void {
 
     try self.push(.from(&function.obj));
     const closure = try Obj.Closure.init(self, function);
-    _ = self.pop();
-    try self.push(.from(&closure.obj));
+    self.setStackTop(.from(&closure.obj));
     try self.call(closure, 0);
 
     return self.run();
@@ -193,8 +192,7 @@ fn run(self: *VM) !void {
                 const name = self.readString();
                 const maybe_value = instance.fields.get(name);
                 if (maybe_value) |value| {
-                    _ = self.pop(); // instance
-                    try self.push(value);
+                    self.setStackTop(value); // replace instance
                     continue;
                 }
                 try self.bindMethod(instance.class, name);
@@ -207,9 +205,8 @@ fn run(self: *VM) !void {
                 };
                 const name = self.readString();
                 _ = try instance.fields.set(name, value);
-                _ = self.pop(); // value
                 _ = self.pop(); // instance
-                try self.push(value); // push value back
+                self.setStackTop(value); // replace instance with value
             },
             .GET_SUPER => {
                 const name = self.readString();
@@ -234,7 +231,7 @@ fn run(self: *VM) !void {
             .SUBTRACT => try self.binaryOp(.SUBTRACT),
             .MULTIPLY => try self.binaryOp(.MULTIPLY),
             .DIVIDE => try self.binaryOp(.DIVIDE),
-            .NOT => try self.push(.from(self.pop().isFalsey())),
+            .NOT => self.setStackTop(.from(self.peek(0).isFalsey())),
             .NEGATE => try self.negateOp(),
             .PRINT => std.io.getStdOut().writer().print("{}\n", .{self.pop()}) catch {
                 return Error.RuntimeError;
@@ -378,6 +375,11 @@ pub fn push(self: *VM, val: Value) !void {
     return self.stack.append(val);
 }
 
+fn setStackTop(self: *VM, val: Value) void {
+    std.debug.assert(self.stack.items.len > 0);
+    self.stack.items.ptr[self.stack.items.len - 1] = val;
+}
+
 fn resetState(self: *VM) void {
     self.frames.clearRetainingCapacity();
     self.stack.clearRetainingCapacity();
@@ -398,18 +400,18 @@ inline fn frameSlot(self: *VM, current_frame: *CallFrame, slot_idx: i16) [*]Valu
 }
 
 fn negateOp(self: *VM) !void {
-    const num = self.pop().as(.Number) orelse
+    const num = self.peek(0).as(.Number) orelse
         return self.runtimeError("Operand must be a number.", .{});
-    try self.push(.from(-num));
+    self.setStackTop(.from(-num));
 }
 
 fn binaryOp(self: *VM, comptime op: OpCode) !void {
     const b = self.pop().as(.Number) orelse
         return self.runtimeError("Operands must be numbers.", .{});
-    const a = self.pop().as(.Number) orelse
+    const a = self.peek(0).as(.Number) orelse
         return self.runtimeError("Operands must be numbers.", .{});
 
-    try self.push(switch (op) {
+    self.setStackTop(switch (op) {
         .ADD => .from(a + b),
         .SUBTRACT => .from(a - b),
         .MULTIPLY => .from(a * b),
@@ -423,20 +425,21 @@ fn binaryOp(self: *VM, comptime op: OpCode) !void {
 }
 
 fn concatenate(self: *VM) !void {
-    const b = self.pop();
-    const a = self.pop();
+    const b = self.peek(0);
+    const a = self.peek(1);
     std.debug.assert(b.isObj(.String));
     std.debug.assert(a.isObj(.String));
     const b_str = b.asObj(.String) orelse return Error.RuntimeError;
     const a_str = a.asObj(.String) orelse return Error.RuntimeError;
     const out = try a_str.concat(self, b_str);
-    try self.push(.from(&out.obj));
+    _ = self.pop(); // b, pop later than allocation for concat
+    self.setStackTop(.from(&out.obj)); // replace a with out
 }
 
 fn equalOp(self: *VM, is_equal: bool) !void {
     const b = self.pop();
-    const a = self.pop();
-    try self.push(.from(is_equal == a.eql(b)));
+    const a = self.peek(0);
+    self.setStackTop(.from(is_equal == a.eql(b)));
 }
 
 fn defineNative(self: *VM, name: []const u8, function: Obj.NativeFn) !void {
@@ -556,8 +559,7 @@ fn bindMethod(self: *VM, class: *Obj.Class, name: *Obj.String) !void {
     const method = class.methods.get(name) orelse
         return self.runtimeError("Undefined property '{s}'.", .{name.chars});
     const bound = try Obj.BoundMethod.init(self, self.peek(0), method.asObj(.Closure).?);
-    _ = self.pop();
-    try self.push(.from(&bound.obj));
+    self.setStackTop(.from(&bound.obj));
 }
 
 test "vm deinit" {
