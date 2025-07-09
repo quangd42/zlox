@@ -8,10 +8,10 @@ This is the implementation for second half of the book [Crafting Interpreters](h
 
 [Zig 0.14](https://ziglang.org/learn/getting-started/) is required to build and run this project.
 
-To execute a lox script:
-
 ```sh
-just run test/field/get_and_set_method.lox
+# build
+zig build -Doptimize=ReleaseSafe -Dnan-boxing
+# the binary is stored in zig-out/bin by default
+# omit the file path to kick off the repl
+./zig-out/bin/zlox test/field/get_and_set_method.lox
 ```
-
-Or omit the file path to kick off the repl.
