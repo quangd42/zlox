@@ -17,6 +17,8 @@ pub const GC = @This();
 
 backing_allocator: Allocator,
 out_of_memory: bool = false,
+bytes_allocated: usize = 0,
+next_gc: usize = 1024 * 1024,
 vm: *VM,
 
 pub fn init(backing_allocator: Allocator, vm: *VM) GC {
@@ -31,7 +33,7 @@ fn alloc(ctx: *anyopaque, len: usize, alignment: mem.Alignment, ret_addr: usize)
     const self: *GC = @ptrCast(@alignCast(ctx));
     if (STRESS_GC) self.collectGarbage();
     self.updateAllocation(len, 0);
-    if (self.vm.bytes_allocated > self.vm.next_gc) self.collectGarbage();
+    if (self.bytes_allocated > self.next_gc) self.collectGarbage();
     return self.backing_allocator.rawAlloc(len, alignment, ret_addr);
 }
 
@@ -39,7 +41,7 @@ fn resize(ctx: *anyopaque, buf: []u8, alignment: mem.Alignment, new_len: usize, 
     const self: *GC = @ptrCast(@alignCast(ctx));
     if (new_len > buf.len and STRESS_GC) self.collectGarbage();
     self.updateAllocation(new_len, buf.len);
-    if (self.vm.bytes_allocated > self.vm.next_gc) self.collectGarbage();
+    if (self.bytes_allocated > self.next_gc) self.collectGarbage();
     return self.backing_allocator.rawResize(buf, alignment, new_len, ret_addr);
 }
 
@@ -53,14 +55,14 @@ fn remap(
     const self: *GC = @ptrCast(@alignCast(ctx));
     if (new_len > buf.len and STRESS_GC) self.collectGarbage();
     self.updateAllocation(new_len, buf.len);
-    if (self.vm.bytes_allocated > self.vm.next_gc) self.collectGarbage();
+    if (self.bytes_allocated > self.next_gc) self.collectGarbage();
     return self.backing_allocator.rawRemap(buf, alignment, new_len, ret_addr);
 }
 
 fn free(ctx: *anyopaque, buf: []u8, alignment: mem.Alignment, ret_addr: usize) void {
     const self: *GC = @ptrCast(@alignCast(ctx));
     self.updateAllocation(0, buf.len);
-    if (self.vm.bytes_allocated > self.vm.next_gc) self.collectGarbage();
+    if (self.bytes_allocated > self.next_gc) self.collectGarbage();
     return self.backing_allocator.rawFree(buf, alignment, ret_addr);
 }
 
@@ -69,15 +71,15 @@ fn collectGarbage(self: *GC) void {
     var before: usize = 0;
     if (LOG_GC) {
         print("-- gc begin\n", .{});
-        before = self.vm.bytes_allocated;
+        before = self.bytes_allocated;
     }
     defer if (LOG_GC) {
         print("-- gc end\n", .{});
         print("   collected {d} bytes (from {d} to {d}) next at {d}\n", .{
-            before - self.vm.bytes_allocated,
+            before - self.bytes_allocated,
             before,
-            self.vm.bytes_allocated,
-            self.vm.next_gc,
+            self.bytes_allocated,
+            self.next_gc,
         });
     };
 
@@ -90,12 +92,15 @@ fn collectGarbage(self: *GC) void {
     tableRemoveWhite(&self.vm.strings);
     self.sweep();
 
-    self.vm.next_gc = self.vm.bytes_allocated * HEAP_GROW_FACTOR;
+    self.next_gc = self.bytes_allocated * HEAP_GROW_FACTOR;
 }
 
 fn markRoots(self: *GC) !void {
     // stack
-    for (self.vm.stack.items) |*slot| try self.markValue(slot);
+    var cursor: [*]Value = &self.vm.stack.data;
+    while (self.vm.stack.top - cursor > 0) : (cursor += 1) {
+        try self.markValue(@ptrCast(cursor));
+    }
 
     // globals
     try self.markTable(&self.vm.globals);
@@ -146,17 +151,18 @@ fn sweep(self: *GC) void {
 
 fn markObj(self: *GC, obj: *Obj) !void {
     if (obj.is_marked) return;
-    if (LOG_GC) print("{*} mark {}\n", .{ obj, .from(obj) });
+    if (LOG_GC) print("{*} mark {}\n", .{ obj, Value.from(obj) });
     obj.is_marked = true;
     try self.vm.gray_stack.append(obj);
 }
 
 fn markValue(self: *GC, value: *Value) !void {
-    if (value.is(.Obj)) try self.markObj(value.as(.Obj).?);
+    const obj = value.as(.Obj) orelse return;
+    try self.markObj(obj);
 }
 
 fn blackenObj(self: *GC, obj: *Obj) !void {
-    if (LOG_GC) print("{*} blacken {}\n", .{ obj, .from(obj) });
+    if (LOG_GC) print("{*} blacken {}\n", .{ obj, Value.from(obj) });
     switch (obj.type) {
         .Native, .String => {},
         .Upvalue => try self.markValue(&obj.as(.Upvalue).closed),
@@ -219,12 +225,12 @@ fn markCompilerRoots(self: *GC) !void {
 
 fn updateAllocation(self: *GC, new_size: usize, old_size: usize) void {
     if (new_size > old_size) {
-        self.vm.bytes_allocated += (new_size - old_size);
+        self.bytes_allocated += (new_size - old_size);
     } else if (old_size > new_size) {
-        if (self.vm.bytes_allocated < (old_size - new_size)) {
-            self.vm.bytes_allocated = 0;
+        if (self.bytes_allocated < (old_size - new_size)) {
+            self.bytes_allocated = 0;
             return;
         }
-        self.vm.bytes_allocated -= (old_size - new_size);
+        self.bytes_allocated -= (old_size - new_size);
     }
 }

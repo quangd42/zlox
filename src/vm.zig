@@ -22,13 +22,18 @@ pub const Error = error{ CompileError, RuntimeError, OutOfMemory };
 const CallFrame = struct {
     closure: *Obj.Closure,
     ip: usize,
-    start: usize,
+    start: [*]Value,
+};
+
+const Stack = struct {
+    data: [STACK_MAX]Value,
+    top: [*]Value,
 };
 
 pub const VM = @This();
 
 frames: std.ArrayList(CallFrame),
-stack: std.ArrayList(Value),
+stack: Stack,
 objects: ?*Obj = null,
 open_upvalues: ?*Obj.Upvalue = null,
 init_string: *Obj.String,
@@ -36,8 +41,6 @@ strings: Table,
 globals: Table,
 compiler: ?Compiler,
 gray_stack: std.ArrayList(*Obj),
-bytes_allocated: usize = 0,
-next_gc: usize = 1024 * 1024,
 gc: GC,
 allocator: Allocator,
 
@@ -57,7 +60,7 @@ pub fn init(backing_allocator: Allocator) !*VM {
         .frames = std.ArrayList(CallFrame).init(vm.allocator),
         // pre allocate enough memory for the stack to avoid triggering gc
         // when using the stack for keeping other objects connected
-        .stack = try std.ArrayList(Value).initCapacity(vm.allocator, 64),
+        .stack = Stack{ .data = [_]Value{.from(0)} ** STACK_MAX, .top = &vm.stack.data },
         // init_string MUST be initialized after the stack
         .init_string = try .init(vm, "init"),
     };
@@ -70,7 +73,6 @@ pub fn init(backing_allocator: Allocator) !*VM {
 pub fn deinit(vm: *VM) void {
     vm.strings.deinit();
     vm.globals.deinit();
-    vm.stack.deinit();
     vm.frames.deinit();
     vm.gray_stack.deinit();
     var object = vm.objects;
@@ -128,7 +130,7 @@ fn interpret(self: *VM, source: []const u8) !void {
     self.compiler = try Compiler.init(self, source);
     const function = self.compiler.?.compile() catch return Error.CompileError;
 
-    try self.push(.from(&function.obj));
+    self.push(.from(&function.obj));
     const closure = try Obj.Closure.init(self, function);
     self.setStackTop(.from(&closure.obj));
     try self.call(closure, 0);
@@ -142,27 +144,28 @@ fn run(self: *VM) !void {
     while (frame.ip < frame.closure.function.chunk.code.items.len) {
         if (TRACE_EXECUTION) {
             print("          ", .{});
-            for (self.stack.items) |slot| {
-                print("[ {} ]", .{slot});
+            var cursor: [*]Value = &self.stack.data;
+            while (self.stack.top - cursor > 0) : (cursor += 1) {
+                print("[ {} ]", .{cursor[0]});
             }
             print("\n", .{});
             _ = debug.disassembleInstruction(&frame.closure.function.chunk, frame.ip);
         }
         const instruction: OpCode = @enumFromInt(self.readByte());
         switch (instruction) {
-            .CONSTANT => try self.push(self.readConstant()),
-            .NIL => try self.push(Value.Nil),
-            .TRUE => try self.push(.from(true)),
-            .FALSE => try self.push(.from(false)),
+            .CONSTANT => self.push(self.readConstant()),
+            .NIL => self.push(Value.Nil),
+            .TRUE => self.push(.from(true)),
+            .FALSE => self.push(.from(false)),
             .POP => _ = self.pop(),
-            .GET_LOCAL => try self.push(self.frameSlot(frame, self.readByte())[0]),
-            .SET_LOCAL => self.frameSlot(frame, self.readByte())[0] = self.peek(0),
+            .GET_LOCAL => self.push(frame.start[self.readByte()]),
+            .SET_LOCAL => frame.start[self.readByte()] = self.peek(0),
             .GET_GLOBAL => {
                 const name = self.readString();
                 const val = self.globals.get(name) orelse {
                     return self.runtimeError("Undefined variable '{s}'.", .{name.chars});
                 };
-                try self.push(val);
+                self.push(val);
             },
             .DEFINE_GLOBAL => {
                 const name = self.readString();
@@ -178,7 +181,7 @@ fn run(self: *VM) !void {
             },
             .GET_UPVALUE => {
                 const slot = self.readByte();
-                try self.push(frame.closure.upvalues[slot].?.location[0]);
+                self.push(frame.closure.upvalues[slot].?.location[0]);
             },
             .SET_UPVALUE => {
                 const slot = self.readByte();
@@ -273,38 +276,38 @@ fn run(self: *VM) !void {
             .CLOSURE => {
                 const function = self.readConstant().asObj(.Function).?;
                 const closure = try Obj.Closure.init(self, function);
-                try self.push(.from(&closure.obj));
+                self.push(.from(&closure.obj));
                 // closure.upvalues was inited with the correct amount of upvalue slots
                 for (closure.upvalues) |*upvalue| {
                     const is_local = self.readByte();
                     const index = self.readByte();
                     if (is_local == 1) {
-                        upvalue.* = try self.captureUpvalue(self.frameSlot(frame, index));
+                        upvalue.* = try self.captureUpvalue(frame.start + index);
                     } else {
                         upvalue.* = frame.closure.upvalues[index];
                     }
                 }
             },
             .CLOSE_UPVALUE => {
-                self.closeUpvalues(self.frameSlot(frame, -1));
+                self.closeUpvalues(self.stack.top - 1);
                 _ = self.pop();
             },
             .RETURN => {
                 const result = self.pop();
-                self.closeUpvalues(self.frameSlot(frame, 0));
+                self.closeUpvalues(frame.start);
                 _ = self.frames.pop();
                 if (self.frames.items.len == 0) {
                     _ = self.pop();
                     return;
                 }
 
-                self.stack.shrinkRetainingCapacity(frame.start);
-                try self.push(result);
+                self.stack.top = frame.start;
+                self.push(result);
                 frame = self.topFrame();
             },
             .CLASS => {
                 const class = try Obj.Class.init(self, self.readString());
-                try self.push(.from(&class.obj));
+                self.push(.from(&class.obj));
             },
             .INHERIT => {
                 const superclass = self.peek(1).asObj(.Class) orelse
@@ -360,43 +363,30 @@ inline fn readString(self: *VM) *Obj.String {
 }
 
 fn peek(self: *VM, distance: usize) Value {
-    const len = self.stack.items.len;
-    std.debug.assert(len > 0 and distance <= len - 1);
-    return self.stack.items[len - 1 - distance];
+    return (self.stack.top - 1 - distance)[0];
 }
 
 pub fn pop(self: *VM) Value {
-    std.debug.assert(self.stack.items.len > 0);
-    return self.stack.pop().?;
+    self.stack.top -= 1;
+    return self.stack.top[0];
 }
 
-pub fn push(self: *VM, val: Value) !void {
-    if (self.stack.items.len == STACK_MAX) return error.OutOfMemory;
-    return self.stack.append(val);
+pub fn push(self: *VM, val: Value) void {
+    self.stack.top[0] = val;
+    self.stack.top += 1;
 }
 
 fn setStackTop(self: *VM, val: Value) void {
-    std.debug.assert(self.stack.items.len > 0);
-    self.stack.items.ptr[self.stack.items.len - 1] = val;
+    (self.stack.top - 1)[0] = val;
 }
 
 fn resetState(self: *VM) void {
     self.frames.clearRetainingCapacity();
-    self.stack.clearRetainingCapacity();
+    self.stack.top = &self.stack.data;
 }
 
 inline fn topFrame(self: *VM) *CallFrame {
     return &self.frames.items[self.frames.items.len - 1];
-}
-
-/// returns Value at slot_idx relative to the current call frame
-/// if slot_idx < 0, wraps
-inline fn frameSlot(self: *VM, current_frame: *CallFrame, slot_idx: i16) [*]Value {
-    const offset: usize = if (slot_idx < 0)
-        self.stack.items.len - @as(usize, @intCast(-1 * slot_idx))
-    else
-        @as(usize, @intCast(slot_idx));
-    return self.stack.items.ptr + current_frame.start + offset;
 }
 
 fn negateOp(self: *VM) !void {
@@ -461,26 +451,26 @@ fn call(self: *VM, closure: *Obj.Closure, arg_count: u8) !void {
     try self.frames.append(.{
         .closure = closure,
         .ip = 0,
-        .start = self.stack.items.len - arg_count - 1,
+        .start = self.stack.top - arg_count - 1,
     });
 }
 
 fn callValue(self: *VM, callee: Value, arg_count: u8) !void {
-    if (!callee.is(.Obj))
+    const callee_obj = callee.as(.Obj) orelse
         return self.runtimeError("Can only call functions and classes.", .{});
-    const callee_obj = callee.as(.Obj).?;
+
     return switch (callee_obj.type) {
         .BoundMethod => {
             const bound = callee_obj.as(.BoundMethod);
-            const callee_idx = self.stack.items.len - arg_count - 1;
-            self.stack.items[callee_idx] = bound.receiver;
+            const callee_ptr = self.stack.top - arg_count - 1;
+            callee_ptr[0] = bound.receiver;
             try self.call(bound.method, arg_count);
         },
         .Class => {
             const class = callee_obj.as(.Class);
             const instance = try Obj.Instance.init(self, class);
-            const callee_idx = self.stack.items.len - arg_count - 1; // index of the callee Value on the stack
-            self.stack.items[callee_idx] = .from(&instance.obj);
+            const callee_ptr = self.stack.top - arg_count - 1; // index of the callee Value on the stack
+            callee_ptr[0] = .from(&instance.obj);
             const maybe_init = class.methods.get(self.init_string);
             if (maybe_init) |init_val| {
                 try self.call(init_val.asObj(.Closure).?, arg_count);
@@ -490,10 +480,10 @@ fn callValue(self: *VM, callee: Value, arg_count: u8) !void {
         .Closure => self.call(callee_obj.as(.Closure), arg_count),
         .Native => {
             const native = callee_obj.as(.Native).function;
-            const first_arg_idx = self.stack.items.len - arg_count; // index of the first arg Value on the stack
-            const result = native(arg_count, self.stack.items.ptr + first_arg_idx);
-            self.stack.shrinkRetainingCapacity(first_arg_idx - 1);
-            try self.push(result);
+            const first_arg_ptr = self.stack.top - arg_count; // index of the first arg Value on the stack
+            const result = native(arg_count, first_arg_ptr);
+            self.stack.top = first_arg_ptr - 1;
+            self.push(result);
         },
         else => self.runtimeError("Can only call functions and classes.", .{}),
     };
@@ -505,8 +495,8 @@ fn invoke(self: *VM, name: *Obj.String, arg_count: u8) !void {
         return self.runtimeError("Only instances have methods.", .{});
     const maybe_value = instance.fields.get(name);
     if (maybe_value) |value| {
-        const callee_idx = self.stack.items.len - arg_count - 1;
-        self.stack.items[callee_idx] = value;
+        const callee_ptr = self.stack.top - arg_count - 1;
+        callee_ptr[0] = value;
         return self.callValue(value, arg_count);
     }
     try self.invokeFromClass(instance.class, name, arg_count);

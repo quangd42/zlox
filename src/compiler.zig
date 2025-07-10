@@ -244,7 +244,7 @@ fn parsePrecedence(self: *Self, precedence: Precedence) !void {
 
 fn makeIdentConstant(self: *Self, lexeme: []const u8) !u8 {
     const str_obj = try Obj.String.init(self.vm, lexeme);
-    try self.vm.push(.from(&str_obj.obj));
+    self.vm.push(.from(&str_obj.obj));
     defer _ = self.vm.pop();
     return self.makeConstant(.from(&str_obj.obj));
 }
@@ -759,22 +759,19 @@ test "test parse rule table" {
 
 // Parse Fns: expressions
 
-fn number(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn number(self: *Self, _: bool) Error!void {
     const val = std.fmt.parseFloat(f64, self.parser.previous.lexeme) catch {
         return self.err("failed to parse number literal.");
     };
     try self.emitConstant(.from(val));
 }
 
-fn grouping(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn grouping(self: *Self, _: bool) Error!void {
     try self.expression();
     self.consume(.RIGHT_PAREN, "Expect ')' after expression.");
 }
 
-fn unary(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn unary(self: *Self, _: bool) Error!void {
     const operator_type = self.parser.previous.type;
     try self.parsePrecedence(.UNARY);
 
@@ -785,8 +782,7 @@ fn unary(self: *Self, can_assign: bool) Error!void {
     };
 }
 
-fn binary(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn binary(self: *Self, _: bool) Error!void {
     const operator_type = self.parser.previous.type;
     const target_prec_int = @intFromEnum(Rules.get(operator_type).precedence) + 1;
     try self.parsePrecedence(@enumFromInt(target_prec_int));
@@ -809,8 +805,7 @@ fn binary(self: *Self, can_assign: bool) Error!void {
     };
 }
 
-fn call(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn call(self: *Self, _: bool) Error!void {
     const arg_count = try self.argumentList();
     try self.emitOpCode(.CALL);
     try self.emitByte(arg_count);
@@ -835,8 +830,7 @@ fn dot(self: *Self, can_assign: bool) Error!void {
     }
 }
 
-fn literal(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn literal(self: *Self, _: bool) Error!void {
     try switch (self.parser.previous.type) {
         .FALSE => self.emitOpCode(.FALSE),
         .NIL => self.emitOpCode(.NIL),
@@ -845,12 +839,11 @@ fn literal(self: *Self, can_assign: bool) Error!void {
     };
 }
 
-fn string(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn string(self: *Self, _: bool) Error!void {
     const prev = &self.parser.previous;
     const str_obj = try Obj.String.init(self.vm, prev.lexeme[1 .. prev.lexeme.len - 1]);
     const val: Value = .from(&str_obj.obj);
-    try self.vm.push(val);
+    self.vm.push(val);
     defer _ = self.vm.pop();
     try self.emitConstant(val);
 }
@@ -885,9 +878,7 @@ fn variable(self: *Self, can_assign: bool) Error!void {
     try namedVariable(self, self.parser.previous.lexeme, can_assign);
 }
 
-fn super(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
-
+fn super(self: *Self, _: bool) Error!void {
     if (self.current_class) |current| {
         if (!current.has_super) self.err("Can't use 'super' in a class with no superclass.");
     } else self.err("Can't use 'super' outside of a class.");
@@ -910,23 +901,20 @@ fn super(self: *Self, can_assign: bool) Error!void {
     }
 }
 
-fn this(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn this(self: *Self, _: bool) Error!void {
     if (self.current_class == null)
         return self.err("Can't use 'this' outside of a class.");
     try self.variable(false);
 }
 
-fn and_(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn and_(self: *Self, _: bool) Error!void {
     const skip_rhs_loc = try self.emitJump(.JUMP_IF_FALSE);
     try self.emitOpCode(.POP);
     try self.parsePrecedence(.AND);
     self.patchJump(skip_rhs_loc);
 }
 
-fn or_(self: *Self, can_assign: bool) Error!void {
-    _ = can_assign;
+fn or_(self: *Self, _: bool) Error!void {
     const skip_rhs_loc = try self.emitJump(.JUMP_IF_TRUE);
     try self.emitOpCode(.POP);
     try self.parsePrecedence(.OR);

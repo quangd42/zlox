@@ -27,6 +27,6 @@ benchmark-compare old_interpreter new_interpreter:
     mkdir -p benchmark-results/{{ old_interpreter }}_v_{{ new_interpreter }}
     fd -t f -e lox . test/benchmark/ -j 1 -x hyperfine \
             --warmup 3 \
-            --command-name "old" "{{ old_interpreter }} {}" \
-            --command-name "new" "{{ new_interpreter }} {}" \
+            --command-name "old" "./{{ old_interpreter }} {}" \
+            --command-name "new" "./{{ new_interpreter }} {}" \
             --export-markdown benchmark-results/{{ old_interpreter }}_v_{{ new_interpreter }}/{/.}.md
