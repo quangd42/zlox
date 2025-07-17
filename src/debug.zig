@@ -43,7 +43,7 @@ pub fn disassembleInstruction(c: *Chunk, offset: usize) usize {
             const const_val = c.constAt(const_idx);
             idx += 1;
             print("{s:-<16} {d:4} {}\n", .{ @tagName(oc), const_idx, const_val });
-            const fun = const_val.asObj(.Function).?;
+            const fun = const_val.asObj(.function).?;
             for (0..fun.upvalue_count) |_| {
                 const is_local = c.byteAt(idx + 1) == 1;
                 const index = c.byteAt(idx + 2);

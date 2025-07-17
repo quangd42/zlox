@@ -40,14 +40,14 @@ pub fn init(vm: *VM, source: []const u8) !Self {
 }
 
 fn setupCompiler(self: *Self, compiler: *Compiler) !void {
-    if (compiler.type != .Script) {
+    if (compiler.type != .script) {
         compiler.function.name = try Obj.String.init(self.vm, self.parser.previous.lexeme);
     }
     compiler.enclosing = self.current_func;
     self.current_func = compiler; // important to happen before any further allocation to keep compiler alive
     try compiler.locals.append(.{
         .depth = 0,
-        .lexeme = if (compiler.type != .Function) "this" else "",
+        .lexeme = if (compiler.type != .function) "this" else "",
     });
 }
 
@@ -65,7 +65,7 @@ fn endCompiler(self: *Self) !*Obj.Function {
 }
 
 pub fn compile(self: *Self) !*Obj.Function {
-    var compiler = try Compiler.init(self.vm, .Script);
+    var compiler = try Compiler.init(self.vm, .script);
     try self.setupCompiler(&compiler);
     while (!self.match(.EOF)) try self.declaration();
     self.consume(.EOF, "Expect end of statement.");
@@ -131,7 +131,7 @@ fn emitLoop(self: *Self, loop_start: usize) !void {
 }
 
 fn emitReturn(self: *Self) !void {
-    if (self.current_func.?.type == .Initializer) {
+    if (self.current_func.?.type == .initializer) {
         // always return instance (at slot 0 of call frame) form initializer
         try self.emitOpCode(.GET_LOCAL);
         try self.emitByte(0);
@@ -408,13 +408,13 @@ fn statement(self: *Self) Error!void {
 
 fn returnStatement(self: *Self) !void {
     self.advance(); // RETURN
-    if (self.current_func.?.type == .Script) {
+    if (self.current_func.?.type == .script) {
         return self.err("Can't return from top-level code.");
     }
     if (self.match(.SEMICOLON)) {
         return self.emitReturn();
     }
-    if (self.current_func.?.type == .Initializer) {
+    if (self.current_func.?.type == .initializer) {
         self.err("Can't return a value from an initializer.");
     }
     try self.expression();
@@ -554,7 +554,7 @@ fn method(self: *Self) !void {
     const method_name = self.parser.previous.lexeme;
     const method_name_idx = try self.makeIdentConstant(method_name);
 
-    const method_type: FunctionType = if (std.mem.eql(u8, method_name, "init")) .Initializer else .Method;
+    const method_type: FunctionType = if (std.mem.eql(u8, method_name, "init")) .initializer else .method;
     try self.function(method_type);
     try self.emitOpCode(.METHOD);
     try self.emitByte(method_name_idx);
@@ -564,7 +564,7 @@ fn funDeclaration(self: *Self) !void {
     self.advance(); // FUN
     const fun_name_idx = try self.parseVariable("Expect function name.");
     self.markInitialized();
-    try self.function(.Function);
+    try self.function(.function);
     try self.defineVariable(fun_name_idx);
 }
 

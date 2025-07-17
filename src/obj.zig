@@ -33,25 +33,25 @@ pub fn as(obj: *Obj, comptime obj_t: Type) *obj_t.VariantType() {
 }
 
 pub const Type = enum {
-    BoundMethod,
-    Class,
-    Closure,
-    Function,
-    Instance,
-    Native,
-    String,
-    Upvalue,
+    bound_method,
+    class,
+    closure,
+    function,
+    instance,
+    native,
+    string,
+    upvalue,
 
     pub fn VariantType(self: Type) type {
         return switch (self) {
-            .BoundMethod => BoundMethod,
-            .Class => Class,
-            .Closure => Closure,
-            .Function => Function,
-            .Instance => Instance,
-            .Native => Native,
-            .String => String,
-            .Upvalue => Upvalue,
+            .bound_method => BoundMethod,
+            .class => Class,
+            .closure => Closure,
+            .function => Function,
+            .instance => Instance,
+            .native => Native,
+            .string => String,
+            .upvalue => Upvalue,
         };
     }
 };
@@ -68,10 +68,10 @@ fn allocateObj(vm: *VM, comptime obj_t: Type) !*obj_t.VariantType() {
 }
 
 pub const FunctionType = enum {
-    Function,
-    Initializer,
-    Method,
-    Script,
+    function,
+    initializer,
+    method,
+    script,
 };
 
 pub const Function = struct {
@@ -83,7 +83,7 @@ pub const Function = struct {
 
     const Self = @This();
     pub fn init(vm: *VM) !*Self {
-        const out = try allocateObj(vm, .Function);
+        const out = try allocateObj(vm, .function);
         vm.push(.from(&out.obj));
         defer _ = vm.pop();
         out.* = .{
@@ -124,7 +124,7 @@ pub const Native = struct {
     const Self = @This();
 
     pub fn init(vm: *VM, function: NativeFn) !*Self {
-        const out = try allocateObj(vm, .Native);
+        const out = try allocateObj(vm, .native);
         out.function = function;
         return out;
     }
@@ -162,7 +162,7 @@ pub const String = struct {
     }
 
     fn allocateString(vm: *VM, chars: []const u8, hash: u32) !*String {
-        const out = try allocateObj(vm, .String);
+        const out = try allocateObj(vm, .string);
         vm.push(.from(&out.obj));
         defer _ = vm.pop();
         out.* = .{
@@ -243,7 +243,7 @@ pub const Upvalue = struct {
     const Self = @This();
 
     pub fn init(vm: *VM, slot: [*]Value) !*Self {
-        const out = try allocateObj(vm, .Upvalue);
+        const out = try allocateObj(vm, .upvalue);
         // vm.push(.from(&out.obj));
         // defer _ = vm.pop();
         out.* = .{
@@ -279,7 +279,7 @@ pub const Closure = struct {
         // important to init upvalues before allocate obj otherwise gc will clean obj up
         const upvalues = try vm.allocator.alloc(?*Upvalue, function.upvalue_count);
         for (upvalues) |*upvalue| upvalue.* = null;
-        const out = try allocateObj(vm, .Closure);
+        const out = try allocateObj(vm, .closure);
         // vm.push(.from(&out.obj));
         // defer _ = vm.pop();
         out.* = .{
@@ -313,7 +313,7 @@ pub const Class = struct {
     const Self = @This();
 
     pub fn init(vm: *VM, name: *String) !*Self {
-        const out = try allocateObj(vm, .Class);
+        const out = try allocateObj(vm, .class);
         // vm.push(.from(&out.obj));
         // defer _ = vm.pop();
         out.* = .{
@@ -360,7 +360,7 @@ pub const Instance = struct {
     const Self = @This();
 
     pub fn init(vm: *VM, class: *Class) !*Self {
-        const out = try allocateObj(vm, .Instance);
+        const out = try allocateObj(vm, .instance);
         vm.push(.from(&out.obj));
         defer _ = vm.pop();
         out.* = .{
@@ -395,7 +395,7 @@ pub const BoundMethod = struct {
     const Self = @This();
 
     pub fn init(vm: *VM, receiver: Value, method: *Closure) !*Self {
-        const out = try allocateObj(vm, .BoundMethod);
+        const out = try allocateObj(vm, .bound_method);
         // vm.push(.from(&out.obj));
         // defer _ = vm.pop();
         out.* = .{
