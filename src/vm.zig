@@ -518,7 +518,6 @@ fn captureUpvalue(self: *VM, local: [*]Value) !*Obj.Upvalue {
             continue;
         }
         if (value.location == local) return value;
-        break;
     }
     var createdUpvalue = try Obj.Upvalue.init(self, local);
     createdUpvalue.next = curr;
