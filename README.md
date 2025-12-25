@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/cdf1d391-ebce-4f78-933a-0b20738c6d2d
 ```sh
 # Build (release mode, NaN-boxing enabled)
 # The binary is stored in zig-out/bin
-zig build -Doptimize=ReleaseSafe -Dnan-boxing
+zig build -Doptimize=ReleaseFast -Dnan-boxing
 
 # Run the full test suite
 zig build test --summary new

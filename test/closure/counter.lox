@@ -1,0 +1,9 @@
+fun makeCounter() {
+	var i = 0;
+	fun inc() { i = i + 1; return i; }
+	return inc;
+}
+
+var c = makeCounter();
+print c(); // expect: 1
+print c(); // expect: 2

@@ -8,7 +8,7 @@ run PATH="": release
     ./zig-out/bin/zlox {{ PATH }}
 
 release:
-    zig build -Doptimize=ReleaseSafe -Dnan-boxing
+    zig build -Doptimize=ReleaseFast -Dnan-boxing
 
 test:
     zig build test --summary new
