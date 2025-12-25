@@ -8,10 +8,12 @@ A tree-walk interpreter for the first half (written in Go) is [available here.](
 ## Demo
 The following demo showcases:
 - Interactive REPL usage
-- Functions and closures
-- Classes and method dispatch
+- Arithmetic, Variable scope, Loops
+- Functions and recursion
+- Closure
+- Classes, method dispatch and inheritance
 
-https://github.com/user-attachments/assets/247c8440-6447-4f2a-9df4-78d9d9988da7
+https://github.com/user-attachments/assets/cdf1d391-ebce-4f78-933a-0b20738c6d2d
 
 ## Usage
 
