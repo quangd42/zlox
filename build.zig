@@ -70,6 +70,30 @@ pub fn build(b: *std.Build) void {
     const run_exe_unit_tests = b.addRunArtifact(unit_tests);
 
     // ... and this exposes a `test` step to the `zig build --help` menu
-    const test_step = b.step("test", "Run unit tests");
+    const test_step = b.step("test", "Run unit tests and integration tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // The test runner tool
+    const exe_test = b.addExecutable(.{
+        .name = "integration_test",
+        .root_source_file = b.path("util/test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Define the 'Run' step for the runner
+    const integration_test_cmd = b.addRunArtifact(exe_test);
+
+    integration_test_cmd.step.dependOn(b.getInstallStep());
+
+    // Pass the interpreter's location as the first argument
+    integration_test_cmd.addArtifactArg(exe);
+
+    // Pass additional CLI args (e.g., zig build test -- test/my_file.lox)
+    if (b.args) |args| {
+        integration_test_cmd.addArgs(args);
+    }
+
+    // Make `test` step execute integration tests
+    test_step.dependOn(&integration_test_cmd.step);
 }

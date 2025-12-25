@@ -22,7 +22,9 @@ test-all: release
 benchmark bench_file: release
     hyperfine --warmup 3 './zig-out/bin/zlox {{ bench_file }}'
 
-# Compare two interpreter versions across all benchmarks e.g. benchmark-compare ./zlox-alm ./zlox-alu
+# Compare two interpreter versions across all benchmarks e.g. benchmark-compare zlox-alm zlox-alu
+
+# binaries to compare are expected to be in the main folder
 benchmark-compare old_interpreter new_interpreter:
     mkdir -p benchmark-results/{{ old_interpreter }}_v_{{ new_interpreter }}
     fd -t f -e lox . test/benchmark/ -j 1 -x hyperfine \

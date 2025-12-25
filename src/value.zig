@@ -141,12 +141,12 @@ test "nan-boxing" {
     const fromstr2 = NanBoxed.from(&str_obj4.obj);
     try expect(str1.eql(str2));
     try expect(str1.eql(fromstr2));
-    try expect(str1.isObj(.String));
-    try expect(str2.isObj(.String));
-    try expect(fromstr2.isObj(.String));
+    try expect(str1.isObj(.string));
+    try expect(str2.isObj(.string));
+    try expect(fromstr2.isObj(.string));
     try expectEqual(&str_obj1.obj, str1.as(.Obj));
-    try expectEqual(str_obj1, str1.asObj(.String).?);
-    try expectEqual(str_obj1, fromstr2.asObj(.String).?);
+    try expectEqual(str_obj1, str1.asObj(.string).?);
+    try expectEqual(str_obj1, fromstr2.asObj(.string).?);
 }
 
 pub const Type = enum {
@@ -284,9 +284,9 @@ test "Value methods" {
     const fromstr2 = Union.from(&str_obj4.obj);
     try testing.expect(str1.eql(str2));
     try testing.expect(str1.eql(fromstr2));
-    try testing.expect(str1.isObj(.String));
-    try testing.expect(str2.isObj(.String));
-    try testing.expect(fromstr2.isObj(.String));
-    try testing.expectEqual(str_obj1, str1.asObj(.String).?);
-    try testing.expectEqual(str_obj1, fromstr2.asObj(.String).?);
+    try testing.expect(str1.isObj(.string));
+    try testing.expect(str2.isObj(.string));
+    try testing.expect(fromstr2.isObj(.string));
+    try testing.expectEqual(str_obj1, str1.asObj(.string).?);
+    try testing.expectEqual(str_obj1, fromstr2.asObj(.string).?);
 }

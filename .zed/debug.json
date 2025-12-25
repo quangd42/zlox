@@ -4,7 +4,7 @@
 // see: https://zed.dev/docs/debugger
 [
   {
-    "label": "Stress GC",
+    "label": "Generic debugging",
     "adapter": "CodeLLDB",
     "program": "./zig-out/bin/zlox",
     "request": "launch",

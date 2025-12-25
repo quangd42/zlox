@@ -154,7 +154,7 @@ fn run(self: *VM) !void {
         const instruction: OpCode = @enumFromInt(self.readByte());
         switch (instruction) {
             .CONSTANT => self.push(self.readConstant()),
-            .NIL => self.push(Value.Nil),
+            .NIL => self.push(.Nil),
             .TRUE => self.push(.from(true)),
             .FALSE => self.push(.from(false)),
             .POP => _ = self.pop(),
@@ -189,7 +189,7 @@ fn run(self: *VM) !void {
             },
             .GET_PROPERTY => {
                 const maybe_instance = self.peek(0);
-                const instance = maybe_instance.asObj(.Instance) orelse {
+                const instance = maybe_instance.asObj(.instance) orelse {
                     return self.runtimeError("Only instances have properties.", .{});
                 };
                 const name = self.readString();
@@ -203,7 +203,7 @@ fn run(self: *VM) !void {
             .SET_PROPERTY => {
                 const value = self.peek(0);
                 const maybe_instance = self.peek(1);
-                const instance = maybe_instance.asObj(.Instance) orelse {
+                const instance = maybe_instance.asObj(.instance) orelse {
                     return self.runtimeError("Only instances have fields.", .{});
                 };
                 const name = self.readString();
@@ -213,7 +213,7 @@ fn run(self: *VM) !void {
             },
             .GET_SUPER => {
                 const name = self.readString();
-                const superclass = self.pop().asObj(.Class).?;
+                const superclass = self.pop().asObj(.class).?;
                 try self.bindMethod(superclass, name);
             },
             .EQUAL => try self.equalOp(true),
@@ -227,7 +227,7 @@ fn run(self: *VM) !void {
                 const lhs = self.peek(1);
                 if (rhs.is(.Number) and lhs.is(.Number)) {
                     try self.binaryOp(.ADD);
-                } else if (rhs.isObj(.String) and lhs.isObj(.String)) {
+                } else if (rhs.isObj(.string) and lhs.isObj(.string)) {
                     try self.concatenate();
                 } else return self.runtimeError("Operands must be two numbers or two strings.", .{});
             },
@@ -269,12 +269,12 @@ fn run(self: *VM) !void {
             .SUPER_INVOKE => {
                 const method = self.readString();
                 const arg_count = self.readByte();
-                const superclass = self.pop().asObj(.Class).?;
+                const superclass = self.pop().asObj(.class).?;
                 try self.invokeFromClass(superclass, method, arg_count);
                 frame = self.topFrame();
             },
             .CLOSURE => {
-                const function = self.readConstant().asObj(.Function).?;
+                const function = self.readConstant().asObj(.function).?;
                 const closure = try Obj.Closure.init(self, function);
                 self.push(.from(&closure.obj));
                 // closure.upvalues was inited with the correct amount of upvalue slots
@@ -310,9 +310,9 @@ fn run(self: *VM) !void {
                 self.push(.from(&class.obj));
             },
             .INHERIT => {
-                const superclass = self.peek(1).asObj(.Class) orelse
+                const superclass = self.peek(1).asObj(.class) orelse
                     return self.runtimeError("Superclass must be a class.", .{});
-                const subclass = self.peek(0).asObj(.Class).?;
+                const subclass = self.peek(0).asObj(.class).?;
                 try subclass.methods.addAll(&superclass.methods);
                 _ = self.pop(); // subclass
             },
@@ -359,7 +359,7 @@ inline fn readShort(self: *VM) u16 {
 
 inline fn readString(self: *VM) *Obj.String {
     const constant = self.readConstant();
-    return constant.asObj(.String).?;
+    return constant.asObj(.string).?;
 }
 
 fn peek(self: *VM, distance: usize) Value {
@@ -417,10 +417,10 @@ fn binaryOp(self: *VM, comptime op: OpCode) !void {
 fn concatenate(self: *VM) !void {
     const b = self.peek(0);
     const a = self.peek(1);
-    std.debug.assert(b.isObj(.String));
-    std.debug.assert(a.isObj(.String));
-    const b_str = b.asObj(.String) orelse return Error.RuntimeError;
-    const a_str = a.asObj(.String) orelse return Error.RuntimeError;
+    std.debug.assert(b.isObj(.string));
+    std.debug.assert(a.isObj(.string));
+    const b_str = b.asObj(.string) orelse return Error.RuntimeError;
+    const a_str = a.asObj(.string) orelse return Error.RuntimeError;
     const out = try a_str.concat(self, b_str);
     _ = self.pop(); // b, pop later than allocation for concat
     self.setStackTop(.from(&out.obj)); // replace a with out
@@ -460,26 +460,26 @@ fn callValue(self: *VM, callee: Value, arg_count: u8) !void {
         return self.runtimeError("Can only call functions and classes.", .{});
 
     return switch (callee_obj.type) {
-        .BoundMethod => {
-            const bound = callee_obj.as(.BoundMethod);
+        .bound_method => {
+            const bound = callee_obj.as(.bound_method);
             const callee_ptr = self.stack.top - arg_count - 1;
             callee_ptr[0] = bound.receiver;
             try self.call(bound.method, arg_count);
         },
-        .Class => {
-            const class = callee_obj.as(.Class);
+        .class => {
+            const class = callee_obj.as(.class);
             const instance = try Obj.Instance.init(self, class);
             const callee_ptr = self.stack.top - arg_count - 1; // index of the callee Value on the stack
             callee_ptr[0] = .from(&instance.obj);
             const maybe_init = class.methods.get(self.init_string);
             if (maybe_init) |init_val| {
-                try self.call(init_val.asObj(.Closure).?, arg_count);
+                try self.call(init_val.asObj(.closure).?, arg_count);
             } else if (arg_count != 0)
                 return self.runtimeError("Expected 0 arguments but got {d}.", .{arg_count});
         },
-        .Closure => self.call(callee_obj.as(.Closure), arg_count),
-        .Native => {
-            const native = callee_obj.as(.Native).function;
+        .closure => self.call(callee_obj.as(.closure), arg_count),
+        .native => {
+            const native = callee_obj.as(.native).function;
             const first_arg_ptr = self.stack.top - arg_count; // index of the first arg Value on the stack
             const result = native(arg_count, first_arg_ptr);
             self.stack.top = first_arg_ptr - 1;
@@ -491,7 +491,7 @@ fn callValue(self: *VM, callee: Value, arg_count: u8) !void {
 
 fn invoke(self: *VM, name: *Obj.String, arg_count: u8) !void {
     const receiver = self.peek(arg_count);
-    const instance = receiver.asObj(.Instance) orelse
+    const instance = receiver.asObj(.instance) orelse
         return self.runtimeError("Only instances have methods.", .{});
     const maybe_value = instance.fields.get(name);
     if (maybe_value) |value| {
@@ -505,7 +505,7 @@ fn invoke(self: *VM, name: *Obj.String, arg_count: u8) !void {
 fn invokeFromClass(self: *VM, class: *Obj.Class, name: *Obj.String, arg_count: u8) !void {
     const method = class.methods.get(name) orelse
         return self.runtimeError("Undefined property '{s}'.", .{name.chars});
-    return self.call(method.asObj(.Closure).?, arg_count);
+    return self.call(method.asObj(.closure).?, arg_count);
 }
 
 fn captureUpvalue(self: *VM, local: [*]Value) !*Obj.Upvalue {
@@ -518,7 +518,6 @@ fn captureUpvalue(self: *VM, local: [*]Value) !*Obj.Upvalue {
             continue;
         }
         if (value.location == local) return value;
-        break;
     }
     var createdUpvalue = try Obj.Upvalue.init(self, local);
     createdUpvalue.next = curr;
@@ -540,7 +539,7 @@ fn closeUpvalues(self: *VM, last: [*]Value) void {
 
 fn defineMethod(self: *VM, name: *Obj.String) !void {
     const method = self.peek(0);
-    const class = self.peek(1).asObj(.Class).?;
+    const class = self.peek(1).asObj(.class).?;
     _ = try class.methods.set(name, method);
     _ = self.pop();
 }
@@ -548,7 +547,7 @@ fn defineMethod(self: *VM, name: *Obj.String) !void {
 fn bindMethod(self: *VM, class: *Obj.Class, name: *Obj.String) !void {
     const method = class.methods.get(name) orelse
         return self.runtimeError("Undefined property '{s}'.", .{name.chars});
-    const bound = try Obj.BoundMethod.init(self, self.peek(0), method.asObj(.Closure).?);
+    const bound = try Obj.BoundMethod.init(self, self.peek(0), method.asObj(.closure).?);
     self.setStackTop(.from(&bound.obj));
 }
 

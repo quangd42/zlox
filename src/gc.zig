@@ -164,35 +164,35 @@ fn markValue(self: *GC, value: *Value) !void {
 fn blackenObj(self: *GC, obj: *Obj) !void {
     if (LOG_GC) print("{*} blacken {}\n", .{ obj, Value.from(obj) });
     switch (obj.type) {
-        .Native, .String => {},
-        .Upvalue => try self.markValue(&obj.as(.Upvalue).closed),
-        .Function => {
-            const function = obj.as(.Function);
+        .native, .string => {},
+        .upvalue => try self.markValue(&obj.as(.upvalue).closed),
+        .function => {
+            const function = obj.as(.function);
             if (function.name) |str| try self.markObj(&str.obj);
             for (function.chunk.constants.items) |*value| {
                 try self.markValue(value);
             }
         },
-        .Closure => {
-            const closure = obj.as(.Closure);
+        .closure => {
+            const closure = obj.as(.closure);
             try self.markObj(&closure.function.obj);
             for (closure.upvalues) |mb_upvalue| {
                 const upvalue = mb_upvalue orelse continue;
                 try self.markObj(&upvalue.obj);
             }
         },
-        .Class => {
-            const class = obj.as(.Class);
+        .class => {
+            const class = obj.as(.class);
             try self.markObj(&class.name.obj);
             try self.markTable(&class.methods);
         },
-        .Instance => {
-            const instance = obj.as(.Instance);
+        .instance => {
+            const instance = obj.as(.instance);
             try self.markObj(&instance.class.obj);
             try self.markTable(&instance.fields);
         },
-        .BoundMethod => {
-            const bound = obj.as(.BoundMethod);
+        .bound_method => {
+            const bound = obj.as(.bound_method);
             try self.markValue(&bound.receiver);
             try self.markObj(&bound.method.obj);
         },
