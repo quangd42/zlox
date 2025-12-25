@@ -11,7 +11,7 @@ The following demo showcases:
 - Functions and closures
 - Classes and method dispatch
 
-[Video](#)
+https://github.com/user-attachments/assets/247c8440-6447-4f2a-9df4-78d9d9988da7
 
 ## Usage
 
